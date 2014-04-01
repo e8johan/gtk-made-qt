@@ -27,7 +27,16 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QAction>
-#include <QCleanlooksStyle>
+
+// Basic stuff here
+
+#ifndef TRUE
+#define TRUE (1)
+#endif
+
+#ifndef FALSE
+#define FALSE (0)
+#endif
 
 // GLib stuff here
 
@@ -133,7 +142,8 @@ typedef QObject GtkWindow;
 void gtk_init(int *argc, char ***argv)
 {
     QApplication *a = new QApplication(*argc,*argv);
-    a->setStyle(new QCleanlooksStyle);
+
+    Q_UNUSED(a)
 }
 
 int gtk_main() { return qApp->exec(); }
@@ -187,6 +197,9 @@ void gtk_window_set_title(QObject *o_w, const char *t)
 
 QWidget *gtk_hbox_new(bool homogenus, int spacing)
 {
+    Q_UNUSED(homogenus)
+    Q_UNUSED(spacing)
+
     QWidget *w = new QWidget;
     w->setLayout(new QHBoxLayout);
     w->layout()->setContentsMargins(0,0,0,0);
@@ -196,6 +209,9 @@ QWidget *gtk_hbox_new(bool homogenus, int spacing)
 
 QWidget *gtk_vbox_new(bool homogenus, int spacing)
 {
+    Q_UNUSED(homogenus)
+    Q_UNUSED(spacing)
+
     QWidget *w = new QWidget;
     w->setLayout(new QVBoxLayout);
     w->layout()->setContentsMargins(0,0,0,0);
@@ -252,6 +268,9 @@ QPushButton *gtk_button_new_with_label(const char *t)
 
 void gtk_box_pack_start(QObject *o_p, QObject *o_w, bool expand, bool fill, int padding)
 {
+    Q_UNUSED(expand)
+    Q_UNUSED(fill)
+
     QT_WIDGET_ASSERT(p)
     QT_WIDGET_ASSERT(w)
 
@@ -264,6 +283,9 @@ void gtk_box_pack_start(QObject *o_p, QObject *o_w, bool expand, bool fill, int 
 
 void gtk_box_pack_end(QObject *o_p, QObject *o_w, bool expand, bool fill, int padding)
 {
+    Q_UNUSED(expand)
+    Q_UNUSED(fill)
+
     QT_WIDGET_ASSERT(p)
     QT_WIDGET_ASSERT(w)
 

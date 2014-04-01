@@ -1,3 +1,5 @@
+QT += widgets
+
 SOURCES += helloworld.cpp \
     qgtkcallbackbridge.cpp \
     qgtkeventfilter.cpp \
