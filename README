@@ -1,0 +1,7 @@
+GTK made Qt
+Copyright(C) 2010-2014 Johan Thelin
+
+This is a hack to demonstrate that the GTK+ APIs can be implemented by using Qt.
+
+This is very far from production ready. Feel free to improve!
+
