@@ -1,12 +1,15 @@
 QT += widgets
 
-SOURCES += helloworld.cpp \
-    qgtkcallbackbridge.cpp \
+# Examples, pick one
+SOURCES += examples/helloworld.cpp
+#SOURCES += examples/tablepacking.cpp
+#SOURCES += examples/manual-menu.cpp
+#SOURCES += examples/range-widgets.cpp # Not implemented
+
+# GTK made Qt files
+SOURCES += qgtkcallbackbridge.cpp \
     qgtkeventfilter.cpp \
     qgtkdeleteeventfilter.cpp \
-    tablepacking.cpp \
-    range-widgets.cpp \
-    manual-menu.cpp \
     qgtkgeneraleventfilter.cpp
 HEADERS += gtk-made-qt.h \
     qgtkcallbackbridge.h \
