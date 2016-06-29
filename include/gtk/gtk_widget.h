@@ -1,10 +1,5 @@
 
-void gtk_widget_show(GtkWidget *widget)
-{
-	Q_ASSERT(widget);
-
-	widget->show();
-}
+#include "../gtk-made-qt.h"
 
 void gtk_widget_destroy(GtkWidget *widget)
 {

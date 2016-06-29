@@ -8,27 +8,19 @@
 	#include <glib.h>
 #endif
 
-#include <QApplication>
-#include <QWidget>
+#include "../gtk-made-qt.h"
+
 #include <QLabel>
-#include <QPushButton>
 #include <QHBoxLayout>
-#include <QVBoxLayout>
-#include <QGridLayout>
 #include <QLineEdit>
 #include <QComboBox>
 #include <QCheckBox>
 #include <QTextEdit>
 #include <QMap>
-#include <QMenuBar>
 #include <QGroupBox>
-#include <QAction>
 #include <QActionGroup>
 
 //#include <glib/glib.h>
-
-typedef QWidget GtkWidget;
-typedef QWidget GtkWindow;
 
 typedef QWidget GtkBox; /* ugh */
 typedef QWidget GtkContainer; /* ugh */
@@ -49,16 +41,10 @@ typedef QLabel GtkLabel;
 
 
 // Stupid GTK typecasting crap.
-#define GTK_BOX(x) x
-#define GTK_CONTAINER(x) x
-#define GTK_TABLE(x) x
-#define GTK_WINDOW(x) x
+
 #define GTK_TEXT_VIEW(x) dynamic_cast<QTextEdit *>(x)
 #define GTK_OBJECT(x) (void *)x /* obsolete */
-#define G_OBJECT(x) (void *)x
 #define GTK_MENU_BAR(x) dynamic_cast<QMenuBar *>(x)
-#define GTK_MENU_ITEM(x) dynamic_cast<QMenu *>(x)
-#define GTK_MENU(x) dynamic_cast<QMenu *>(x)
 #define GTK_LABEL(x) dynamic_cast<QLabel *>(x)
 #define GTK_ABOUT_DIALOG(x) dynamic_cast<GQTAboutDialog *>(x)
 

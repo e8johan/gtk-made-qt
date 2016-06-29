@@ -58,8 +58,8 @@ char *g_strdup(const char *s)
 }
 
 #include "glibtypes.h"
-#include "qgtkcallbackbridge.h"
-#include "qgtkeventfilter.h"
+/* #include "qgtkcallbackbridge.h"
+#include "qgtkeventfilter.h" */ /* missing? */
 
 #define G_CALLBACK(func) ((void*)(func))
 
@@ -136,8 +136,8 @@ typedef QObject GtkWindow;
 #define GTK_BOX(obj) (obj)
 #define GTK_TABLE(obj) (obj)
 #define GTK_MENU_SHELL(obj) (obj)
-#define GTK_MENU_ITEM(obj) (obj)
-#define GTK_MENU(obj) (obj)
+#define GTK_MENU_ITEM(x) dynamic_cast<QMenu *>(x) /*from gqt */
+#define GTK_MENU(x) dynamic_cast<QMenu *>(x) /* from gqt */
 
 // Application wide functions
 

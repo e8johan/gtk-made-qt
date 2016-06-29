@@ -1,4 +1,6 @@
 
+#include "../gtk-made-qt.h"
+
 enum GtkWindowType
 {
 	GTK_WINDOW_TOPLEVEL,
@@ -14,22 +16,6 @@ class GQTWindow : public QWidget
 		gqt_signal_execute(this, "delete-event");
 	}
 };
-
-
-GtkWidget *gtk_window_new(GtkWindowType type)
-{
-	// XXX: handle GtkWindowType properly.
-	GtkWidget *g = new GQTWindow();
-	g->setAttribute(Qt::WA_DeleteOnClose);
-	return g;
-}
-
-void gtk_window_set_title(GtkWindow *window, const gchar *title)
-{
-	Q_ASSERT(window && title);
-
-	window->setWindowTitle(title);
-}
 
 // XXX: I am not sure this implementation is correct. GTK's documentation on it sucks ass. (it implies this should resize, but then, why 'default size'?)
 void gtk_window_set_default_size(GtkWindow *window, gint width, gint height)

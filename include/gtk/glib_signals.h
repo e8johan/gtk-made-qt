@@ -1,4 +1,7 @@
 // glib overrides for signal bits
+
+#include "../gtk-made-qt.h"
+
 typedef void (*GCallback)(GtkWidget *target, gpointer);
 #define G_CALLBACK(x) (GCallback)x
 #define g_list_append(x, y) g_list_append(x, (void *)y)
@@ -28,13 +31,6 @@ class GQTSignalHandler
  * It stores a map of signals which are hooked, i.e. 'clicked' -> pointer.
  */
 static QMap<void *, QMap<QString, GQTSignalHandler *> > gqt_signals;
-
-gulong g_signal_connect(gpointer instance, const gchar *detailed_signal, GCallback c_handler, gpointer data)
-{
-	Q_ASSERT(instance && detailed_signal && c_handler);
-	qDebug("g_signal_connect(): Hooked %s signal on %p going to %p", detailed_signal, instance, c_handler);
-	gqt_signals[instance][detailed_signal] = new GQTSignalHandler(c_handler, data);
-}
 
 void gqt_signal_execute(void *widget, const gchar *signal)
 {

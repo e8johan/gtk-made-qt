@@ -18,18 +18,12 @@ class GQTPushButton : public QPushButton
 		}
 };
 
+#include "../gtk-made-qt.h"
 #include <gtk/moc_gtk_button.h>
 
 GtkWidget *gtk_button_new()
 {
 	return new GtkButton(NULL, NULL);
-}
-
-GtkWidget *gtk_button_new_with_label(const gchar *text)
-{
-	Q_ASSERT(text);
-
-	return new GtkButton(text, NULL);
 }
 
 GtkWidget *gtk_toggle_button_new_with_label(const gchar *text)

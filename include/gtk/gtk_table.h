@@ -1,18 +1,8 @@
 // XXX: implement homogenous
 // NOTE: columns and rows are ignored here, Qt doesn't require them
-GtkWidget *gtk_table_new(guint rows, guint columns, gboolean homogenous)
-{
-	// Oh, dear god.
-	// In GTK, layouts are children of widgets. In Qt, they aren't.
-	// This fragile hack will work around that by creating a widget
-	// and a layout, setting the layout on the widget, 
-	// and returning the created widget. UGH.
-	GtkWidget *g = new GtkWidget(NULL);
-	QGridLayout *h = new QGridLayout(NULL);
-	h->setParent(g);
-	g->setLayout(h);
-	return g;
-}
+
+#include "../gtk-made-qt.h"
+
 
 void gtk_table_attach(GtkTable *table, GtkWidget *child,
 		guint left_attach, guint right_attach,
