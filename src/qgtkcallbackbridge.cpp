@@ -17,7 +17,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-#include "qgtkcallbackbridge.h"
+#include <qgtkcallbackbridge.h>
 
 QGtkCallbackBridge::QGtkCallbackBridge(QObject *src, callbackFuncPtr f, void *data, bool swapped) :
     QObject(0), m_f(f), m_data(data), m_swapped(swapped)

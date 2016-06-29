@@ -58,8 +58,8 @@ char *g_strdup(const char *s)
 }
 
 #include "glibtypes.h"
-/* #include "qgtkcallbackbridge.h"
-#include "qgtkeventfilter.h" */ /* missing? */
+#include "qgtkcallbackbridge.h"
+#include "qgtkeventfilter.h" 
 
 #define G_CALLBACK(func) ((void*)(func))
 
@@ -176,7 +176,7 @@ void gtk_widget_set_size_request(QObject *o_w, int width, int height)
 
 // Window modification functions and defines
 
-#define GTK_WINDOW_TOPLEVEL (0)
+#define GTK_WINDOW_TOPLEVEL (0) 
 QWidget *gtk_window_new(int)
 {
     // Seems like all windows can act as a container, see example tablepacking, pick HBoxLayout as std

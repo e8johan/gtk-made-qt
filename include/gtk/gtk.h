@@ -1,14 +1,7 @@
 #ifndef __GTK__
 #define __GTK__
 
-// We override parts of glib (like signals), so make sure that glib is *always* included first.
-#ifndef g_signal_connect
-	#warning "You must include glib.h before gtk.h. I'm doing it for you for now."
-	#pragma message("You must include glib.h before gtk.h. I'm doing it for you for now.")
-	#include <glib.h>
-#endif
-
-#include "../gtk-made-qt.h"
+#include "../gtk-made-qt.h" /*replaces glib */
 
 #include <QLabel>
 #include <QHBoxLayout>

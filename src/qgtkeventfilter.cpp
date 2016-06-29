@@ -17,10 +17,10 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-#include "qgtkeventfilter.h"
+#include <qgtkeventfilter.h>
 
-#include "qgtkdeleteeventfilter.h"
-#include "qgtkgeneraleventfilter.h"
+#include <qgtkdeleteeventfilter.h>
+#include <qgtkgeneraleventfilter.h>
 
 QGtkEventFilter::QGtkEventFilter(eventFuncPtr f, void *data) :
     QObject(0), m_f(f), m_data(data)

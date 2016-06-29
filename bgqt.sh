@@ -1,19 +1,33 @@
 #!/bin/sh
 if [ ! -n "$1" ]
 then
-	test="test"
+	_test="test"
 	echo "no test specified, running test"
 else
 	echo "running $1"
-	test=$1
+	_test=$1
 fi
 
-# run MOC first
-~/qt4-bin/bin/moc -i gtk/gtk_button.h -o gtk/moc_gtk_button.h
-~/qt4-bin/bin/moc -i gtk/gtk_entry.h -o gtk/moc_gtk_entry.h
-~/qt4-bin/bin/moc -i gtk/gtk_combo.h -o gtk/moc_gtk_combo.h
-g++ "examples/$test.c" -o test -ggdb3 -I/home/w00t/gqt -I/home/w00t/qt4-bin/include -I/home/w00t/qt4-bin/include/QtGui -I/home/w00t/qt4-bin/include/QtUiTools -I/home/w00t/qt4-bin/include/QtCore -L/home/w00t/qt4-bin/lib -lQtCore -lQtGui -l QtUiTools -Wl,--rpath -Wl,/home/w00t/qt4-bin/lib `pkg-config --cflags --libs glib-2.0`
-rm gtk/moc_gtk_button.h
-rm gtk/moc_gtk_entry.h
-rm gtk/moc_gtk_combo.h
-./test -widgetcount
+#various directories. Change if you use another path
+_Here=$(pwd)
+_QtInclude=/usr/include/qt
+_QtLib=/usr/lib
+_QtBin=/usr/lib/qt/bin
+
+#prepare moc headers
+"${_QtBin}"/moc -i include/gtk/gtk_button.h -o include/gtk/moc_gtk_button.h
+"${_QtBin}"/moc -i include/gtk/gtk_entry.h -o include/gtk/moc_gtk_entry.h
+"${_QtBin}"/moc -i include/gtk/gtk_combo.h -o include/gtk/moc_gtk_combo.h
+
+# build library
+qmake-qt5 gtk-made-qt.pro
+make
+
+# compile
+g++ -fPIC "examples/${_test}.c" -o ${_test} -ggdb3 -I"${_Here}"/include -I"${_QtInclude}" -I"${_QtInclude}"/QtGui -I"${_QtInclude}"/QtWidgets -I"${_QtInclude}"/QtUiTools -I"${_QtInclude}"/QtCore -L"${_QtLib}" -L"${_Here}"/lib -lgt -lQt5Core -lQt5Gui -lQt5Widgets -Wl,--rpath -Wl,"${_Here}"/lib
+
+
+./"${_test}" -widgetcount
+
+
+
