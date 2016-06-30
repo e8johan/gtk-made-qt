@@ -2,6 +2,7 @@ TEMPLATE = lib
 
 TARGET = gt
 DESTDIR = ../lib
+CONFIG += staticlib
 VERSION = 0.1.0
 
 QT += widgets
