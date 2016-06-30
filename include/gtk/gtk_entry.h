@@ -47,7 +47,7 @@ const gchar *gtk_entry_get_text(GtkEntry *entry)
 {
 	Q_ASSERT(entry);
 
-	return entry->text().toAscii().constData();
+	return entry->text().toLatin1().constData();
 }
 
 void gtk_entry_append_text(GtkEntry *entry, const gchar *text)

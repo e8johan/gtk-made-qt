@@ -13,7 +13,7 @@ const gchar *gtk_label_get_text(GtkLabel *l)
 {
 	Q_ASSERT(l);
 
-	return l->text().toAscii().constData();
+	return l->text().toLatin1().constData();
 }
 
 void gtk_label_set_text(GtkLabel *l, const gchar *text)

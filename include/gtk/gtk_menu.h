@@ -6,7 +6,7 @@ void gtk_menu_bar_append(GtkMenuBar *menubar, GtkWidget *widget)
 	Q_ASSERT(menubar && widget);
 
 	QMenu *m = dynamic_cast<QMenu *>(widget);
-	qDebug("gtk_menu_bar_append(): appending %p(%s) to menubar %p", m, m->title().toAscii().data(), menubar);
+	qDebug("gtk_menu_bar_append(): appending %p(%s) to menubar %p", m, m->title().toLatin1().data(), menubar);
 
 	Q_ASSERT(menubar && m);
 

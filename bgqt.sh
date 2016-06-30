@@ -26,7 +26,7 @@ qmake-qt5 gtk-made-qt.pro
 make
 
 # compile
-g++ -fPIC "examples/${_test}.c" -o ${_test} -ggdb3 -DUSE_GLIB2 -I"${_Here}"/include -I"${_Glib2LibInclude}" -I"${_Glib2Include}" -I"${_QtInclude}" -I"${_QtInclude}"/QtGui -I"${_QtInclude}"/QtWidgets -I"${_QtInclude}"/QtUiTools -I"${_QtInclude}"/QtCore -L"${_QtLib}" -L"${_Here}"/lib -lgt -lQt5Core -lQt5Gui -lQt5Widgets -Wl,--rpath -Wl,"${_Here}"/lib
+g++ -fPIC -fpermissive "examples/${_test}.c" -o ${_test} -ggdb3 -DUSE_GLIB2 -I"${_Here}"/include -I"${_Glib2LibInclude}" -I"${_Glib2Include}" -I"${_QtInclude}" -I"${_QtInclude}"/QtGui -I"${_QtInclude}"/QtWidgets -I"${_QtInclude}"/QtUiTools -I"${_QtInclude}"/QtCore -L"${_QtLib}" -L"${_Here}"/lib -lgt -lQt5Core -lQt5Gui -lQt5Widgets -lQt5UiTools -lGL -lpthread -lglib-2.0 -Wl,--rpath -Wl,"${_Here}"/lib
 
 ./"${_test}" -widgetcount
 

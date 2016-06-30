@@ -26,6 +26,7 @@
 
 #include <QApplication>
 #include <QWidget>
+//#include <QWindow>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QGridLayout>
@@ -128,8 +129,8 @@ void g_signal_connect_swapped(QObject *src, const char *cstrEventName, void *f, 
 
 // Types and type casting macros
 
-typedef QObject GtkWidget;
-typedef QObject GtkWindow;
+typedef QWidget GtkWidget;
+typedef QWidget GtkWindow;
 
 #define QT_WIDGET_ASSERT(name) QWidget *name = qobject_cast<QWidget*>(o_##name); Q_ASSERT(name);
 #define QT_WIDGET(name) QWidget *name = qobject_cast<QWidget*>(o_##name);

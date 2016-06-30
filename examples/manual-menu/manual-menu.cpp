@@ -37,8 +37,8 @@ int main( int   argc,
     GtkWidget *window;
     GtkWidget *menu;
     GtkWidget *menu_bar;
-    GtkWidget *root_menu;
-    GtkWidget *menu_items;
+    QAction *root_menu;
+    QAction *menu_items;
     GtkWidget *vbox;
     GtkWidget *button;
     char buf[128];
