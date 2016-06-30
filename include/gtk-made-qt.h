@@ -20,6 +20,10 @@
 #ifndef GTKMADEQT_H
 #define GTKMADEQT_H
 
+#ifdef USE_GLIB2
+#include <glib.h> /* temporary? re-map to Qt? */
+#endif
+
 #include <QApplication>
 #include <QWidget>
 #include <QHBoxLayout>
@@ -44,9 +48,11 @@
 
 #define G_OBJECT(obj) ((QObject*)(obj))
 
+#ifndef USE_GLIB2
 typedef void* gpointer;
 typedef bool gboolean;
 typedef char gchar;
+#endif
 
 #define g_print qDebug
 
@@ -176,7 +182,12 @@ void gtk_widget_set_size_request(QObject *o_w, int width, int height)
 
 // Window modification functions and defines
 
-#define GTK_WINDOW_TOPLEVEL (0) 
+enum GtkWindowType
+{
+	GTK_WINDOW_TOPLEVEL,
+	GTK_WINDOW_POPUP
+};
+
 QWidget *gtk_window_new(int)
 {
     // Seems like all windows can act as a container, see example tablepacking, pick HBoxLayout as std
