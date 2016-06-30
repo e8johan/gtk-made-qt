@@ -17,8 +17,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
  */
 
-// REMOVE #include <gtk/gtk.h>
-#include "gtk-made-qt.h"
+#include <gtk/gtk.h>
 
 /* Our new improved callback.  The data passed to this function
  * is printed to stdout. */

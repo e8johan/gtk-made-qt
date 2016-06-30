@@ -18,8 +18,7 @@
  */
 
 #include <stdio.h>
-// TODO #include <gtk/gtk.h>
-#include "gtk-made-qt.h"
+#include <gtk/gtk.h>
 
 static gboolean button_press (GtkWidget *, GdkEvent *);
 

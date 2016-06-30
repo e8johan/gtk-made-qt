@@ -16,16 +16,20 @@ _QtBin=/usr/lib/qt/bin
 _Glib2Include=/usr/include/glib-2.0
 _Glib2LibInclude=/usr/lib/glib-2.0/include
 
-#prepare moc headers - TODO: figure out how to do this in qmake
-"${_QtBin}"/moc -i include/gtk/gtk_button.h -o include/gtk/moc_gtk_button.h
-"${_QtBin}"/moc -i include/gtk/gtk_entry.h -o include/gtk/moc_gtk_entry.h
-"${_QtBin}"/moc -i include/gtk/gtk_combo.h -o include/gtk/moc_gtk_combo.h
+if [ -e "${_Here}"/lib/libgt.a ]; then
+	echo "library already built..."
+else
+	#prepare moc headers - TODO: figure out how to do this in qmake
+	"${_QtBin}"/moc -i include/gtk/gtk_button.h -o include/gtk/moc_gtk_button.h
+	"${_QtBin}"/moc -i include/gtk/gtk_entry.h -o include/gtk/moc_gtk_entry.h
+	"${_QtBin}"/moc -i include/gtk/gtk_combo.h -o include/gtk/moc_gtk_combo.h
 
-# build library
-qmake-qt5 gtk-made-qt.pro
-make
+	# build library
+	qmake-qt5 gtk-made-qt.pro
+	make
+fi
 
-# compile
+# compile test applications
 g++ -fPIC -fpermissive "examples/${_test}.c" -o ${_test} -ggdb3 -DUSE_GLIB2 -I"${_Here}"/include -I"${_Glib2LibInclude}" -I"${_Glib2Include}" -I"${_QtInclude}" -I"${_QtInclude}"/QtGui -I"${_QtInclude}"/QtWidgets -I"${_QtInclude}"/QtUiTools -I"${_QtInclude}"/QtCore -L"${_QtLib}" -L"${_Here}"/lib -lgt -lQt5Core -lQt5Gui -lQt5Widgets -lQt5UiTools -lGL -lpthread -lglib-2.0 -Wl,--rpath -Wl,"${_Here}"/lib
 
 ./"${_test}" -widgetcount
