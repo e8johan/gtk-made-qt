@@ -2,6 +2,7 @@ TEMPLATE = lib
 
 TARGET = gt
 DESTDIR = ../lib
+CONFIG += staticlib
 VERSION = 0.1.0
 
 QT += widgets
@@ -16,10 +17,10 @@ SOURCES += \
     qgtkgeneraleventfilter.cpp
 
 HEADERS += \
-    qgtkcallbackbridge.h \
-    qgtkeventfilter.h \
-    qgtkdeleteeventfilter.h \
-    qgtkgeneraleventfilter.h
+    ../include/qgtkcallbackbridge.h \
+    ../include/qgtkeventfilter.h \
+    ../include/qgtkdeleteeventfilter.h \
+    ../include/qgtkgeneraleventfilter.h
 
 HEADERS += \
     ../include/gtk-made-qt.h \

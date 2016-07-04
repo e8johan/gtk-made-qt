@@ -1,0 +1,28 @@
+Hi there.
+
+If you've found this code, chances are, it's not what you want. It's very incomplete, probably very ugly, and it may also be against your religious beliefs.
+
+If you're still with me, here's what it is. At the core of things, it's a wrapper providing the GTK (and GLib interfaces) wrapping around Qt.
+
+The ultimate aim is to allow GTK/GLib applications to compile with Qt to provide a more unified system (with less dependancies, i.e. GTK), and to ease porting of applications to Qt.
+
+Architecturally, it's one big ugly .h (this will probably change, as more stuff is wrapped) 'gtk/gtk.h', which provides the GTK API, and includes the Qt equivilants (i.e. QtGui and so on) to do the heavy lifting.
+
+To use this with an application using GTK, you'll need to first verify it builds as valid C++ (sorry, it's required.)
+
+To do this, substitute g++ for gcc, and make sure it doesn't blow up.
+
+If it does, fix your code.
+
+If it doesn't, try something like this:
+g++ my.c -o myapp -I/home/my/path/to/gqt -I/home/my/path/to/qt4/include -I/home/my/path/to/qt4/include/QtGui -I/home/my/path/to/qt4/include/QtCore -L/home/my/path/to/qt4/lib -lQtCore -lQtGui -Wl, --rpath -Wl, /home/my/path/to/qt4/lib
+
+.. and obviously, run myapp.
+
+If it doesn't work, fix it, and tell me about the fix.
+
+I am reachable at:
+Robin Burchell <viroteck@viroteck.net>
+
+Thanks to:
+John Brooks <special@dereferenced.net>
