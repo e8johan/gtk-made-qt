@@ -1,7 +1,7 @@
 GTK made Qt
 Copyright(C) 2010-2014 Johan Thelin
 
-Souce code from the gqt project
+Source code from the gqt project
 Copyright(C) Robin Burchell
 has been merged, for more detalis, see README.gqt
 
@@ -12,7 +12,7 @@ This is very far from production ready. Feel free to improve!
 
 BUILDING
 
-run qmake-qt5 gtk-made-qt.pro
+qmake-qt5 gtk-made-qt.pro
 make
 
 
