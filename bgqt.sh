@@ -19,12 +19,6 @@ _Glib2LibInclude=/usr/lib/glib-2.0/include
 if [ -e "${_Here}"/lib/libgt.a ]; then
 	echo "library already built..."
 else
-	#prepare moc headers - TODO: figure out how to do this in qmake
-	"${_QtBin}"/moc -i include/gtk/gtk_button.h -o include/gtk/moc_gtk_button.h
-	"${_QtBin}"/moc -i include/gtk/gtk_entry.h -o include/gtk/moc_gtk_entry.h
-	"${_QtBin}"/moc -i include/gtk/gtk_combo.h -o include/gtk/moc_gtk_combo.h
-
-	# build library
 	qmake-qt5 gtk-made-qt.pro
 	make
 fi

@@ -1,5 +1,6 @@
 TEMPLATE = subdirs
 
-SUBDIRS = src
+SUBDIRS = include src
+
 
 
