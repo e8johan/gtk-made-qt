@@ -79,7 +79,7 @@ void gtk_menu_shell_append(QObject *o_m, QObject *o_a)
     Q_ASSERT(m || mb);
 
     // Menu item can be either QAction or QMenu
-    QT_PTR_ASSERT(QAction,a)
+    QT_PTR(QAction,a)
 
     if(m) {
         m->addAction(a);
