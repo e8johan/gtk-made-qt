@@ -22,7 +22,7 @@
 
 // Widget modification functions and defines
 
-void gtk_widget_show(QObject *o_w)
+void gtk_widget_show(GtkWidget *o_w)
 {
     QT_WIDGET(w) // No assert, can be QAction
 
@@ -35,7 +35,7 @@ void gtk_widget_show(QObject *o_w)
         w->setVisible(true);
 }
 
-void gtk_widget_set_size_request(QObject *o_w, int width, int height)
+void gtk_widget_set_size_request(GtkWidget *o_w, int width, int height)
 {
     QT_WIDGET_ASSERT(w)
 

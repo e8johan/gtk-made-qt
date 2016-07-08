@@ -55,14 +55,20 @@ void gtk_menu_append(GtkMenuShell *menu_shell, GtkWidget *child)
 }
 
 // Menu functions and defines
-QMenu *gtk_menu_new()
+GtkWidget *gtk_menu_new()
 {
-    return new QMenu;
+	QMenu *q = new QMenu(NULL);
+	qDebug("gtk_menu_new(): returning %p", q);
+	return q;
 }
 
-QAction *gtk_menu_item_new_with_label(const char *t)
+GtkWidget *gtk_menu_item_new_with_label(const gchar *text)
 {
-    return new QAction(QString(t), qApp);
+	Q_ASSERT(text);
+
+	QWidget *q = new QMenu(text, NULL);
+	//qDebug("gtk_menu_item_new_with_label(): returning %p", q);
+	return q;
 }
 
 void gtk_menu_shell_append(QObject *o_m, QObject *o_a)
@@ -92,7 +98,7 @@ void gtk_menu_item_set_submenu(QObject *o_rm, QObject *o_m)
 
 QWidget *gtk_menu_bar_new()
 {
-    return new QMenuBar;
+    return new QMenuBar(NULL);
 }
 
 void gtk_menu_popup(QObject *o_m, void*, void*, void*, void*, int, int)
