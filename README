@@ -1,7 +1,31 @@
 GTK made Qt
 Copyright(C) 2010-2014 Johan Thelin
 
+Souce code from the gqt project
+Copyright(C) Robin Burchell
+has been merged, for more detalis, see README.gqt
+
 This is a hack to demonstrate that the GTK+ APIs can be implemented by using Qt.
 
 This is very far from production ready. Feel free to improve!
+
+
+BUILDING
+
+run qmake-qt5 gtk-made-qt.pro
+make
+
+
+BUILD+TEST
+
+For automatic building and testing an application, run the bgqt.sh script
+with the name of one of the tests in the "examples" directory.
+
+for example: 
+./bgqt.sh button
+
+will first build the headers and library and then compile examples/button.c
+and lastly execute the examples/button binary.
+
+For comparison, there is also a bgtk.sh script which builds the same examples using GTK.
 

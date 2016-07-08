@@ -4,6 +4,7 @@
 */.directory
 */*/.directory
 Makefile
+include/fakeMake
 include/gtk/moc_gtk_button.h
 include/gtk/moc_gtk_combo.h
 include/gtk/moc_gtk_entry.h
