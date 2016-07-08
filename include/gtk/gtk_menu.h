@@ -88,17 +88,20 @@ void gtk_menu_shell_append(QObject *o_m, QObject *o_a)
     }
 }
 
-void gtk_menu_item_set_submenu(QObject *o_rm, QObject *o_m)
+void gtk_menu_item_set_submenu(GtkMenuItem *menu_item, GtkWidget *submenu)
 {
-    QT_PTR_ASSERT(QAction,rm)
-    QT_PTR_ASSERT(QMenu,m)
+	// grargh.. gtk_menu_new() isn't really needed by us (it way overcomplicates things) so use a map to
+	// find the 'real' item and totally ignore the pointer returned by gtk_menu_new except for lookups..
+	//qDebug("gtk_menu_item_set_submenu(): Setting %p to lookup to %p", submenu, menu_item);
+	gqt_menu_hack_lookup[submenu] = menu_item;
 
-    rm->setMenu(m);
+	// but ensure the fake gtk_menu_new() item is deleted when the lookup menu is deleted.
+	submenu->QObject::setParent(menu_item);
 }
 
 QWidget *gtk_menu_bar_new()
 {
-    return new QMenuBar(NULL);
+    return new QMenuBar;
 }
 
 void gtk_menu_popup(QObject *o_m, void*, void*, void*, void*, int, int)
