@@ -1,31 +1,160 @@
 GTK made Qt
-Copyright(C) 2010-2014 Johan Thelin
+===========
 
-Source code from the gqt project
-Copyright(C) Robin Burchell
-has been merged, for more detalis, see README.gqt
+Compile GTK 2, GTK 3 and GTK 4 programs - unmodified, as plain C - and have
+them run on Qt 6 (or Qt 5.15).
 
-This is a hack to demonstrate that the GTK+ APIs can be implemented by using Qt.
+Copyright (C) 2010-2014 Johan Thelin, Robin Burchell (gqt) and contributors.
+Licensed under the LGPL 2.1 or later with a static linking exception; see
+COPYING. The history of the two original projects is described in README.gqt.
 
-This is very far from production ready. Feel free to improve!
-
-
-BUILDING
-
-qmake-qt5 gtk-made-qt.pro
-make
+    ./bgqt.sh gtk2/gcif          # a 2007 GTK 2 app, untouched, on Qt 6
+    ./bgqt.sh gtk3/treeview
+    ./bgqt.sh gtk4/application
 
 
-BUILD+TEST
+How it works
+------------
 
-For automatic building and testing an application, run the bgqt.sh script
-with the name of one of the tests in the "examples" directory.
+* The public headers (include/gtk/gtk.h, include/gdk/gdk.h) are plain C, so
+  programs are compiled with gcc as they always were. No C++, no -fpermissive.
 
-for example: 
-./bgqt.sh button
+* Every widget is a real GObject (GtkWidget -> GtkContainer -> GtkBox ...),
+  so g_signal_connect(), g_object_set(), properties, "notify::", refcounting,
+  floating references, type checks and cast macros behave like GTK. Programs
+  can subclass widgets with G_DEFINE_TYPE.
 
-will first build the headers and library and then compile examples/button.c
-and lastly execute the examples/button binary.
+* Each GtkWidget owns one Qt object: a QWidget, or a QAction for menu items
+  (GTK menu items are widgets, Qt's are actions - that mismatch is what made
+  the old menus crash). A small bridge object turns Qt signals and events into
+  GTK signals and GdkEvents, and Qt objects are deleted from an idle callback,
+  so a widget can safely destroy itself from its own signal handler.
 
-For comparison, there is also a bgtk.sh script which builds the same examples using GTK.
+* Qt on Linux already runs on the GLib main loop, so g_timeout_add(),
+  g_idle_add(), GIO async calls and GApplication simply work. GtkApplication is
+  a real GApplication subclass.
 
+* One library serves all three GTK generations. The API level is picked at
+  compile time with -DGTKQT_API_VERSION=2|3|4, which the bundled drop-in
+  pkg-config files (gtk+-2.0.pc, gtk+-3.0.pc, gtk4.pc) pass for you. Where the
+  generations disagree (gtk_init() and gtk_window_new() lost their arguments
+  in GTK 4; GTK 4 widgets are visible by default ...) the headers and runtime
+  follow the generation the program was written for.
+
+Dependencies: Qt 6 (or 5.15) Widgets, GLib/GObject/GIO/GModule, cairo, CMake.
+GLib and cairo are plain C libraries, not GTK.
+
+
+Building
+--------
+
+    cmake -S . -B build
+    cmake --build build
+    cd build && ctest            # headless: QT_QPA_PLATFORM=offscreen
+
+    cmake -S . -B build -DGTKQT_QT_MAJOR=5     # build against Qt 5.15 instead
+
+Using it with an existing GTK project: point pkg-config at the shim and build
+as usual.
+
+    export PKG_CONFIG_PATH=/path/to/gtk-made-qt/build/pkgconfig
+    gcc myapp.c $(pkg-config --cflags --libs gtk+-3.0)
+
+"cmake --install" installs the same files to <prefix>/lib/gtk-made-qt/pkgconfig.
+
+bgqt.sh builds and runs one example against the shim this way; bgtk.sh does
+the same with the real GTK, for side-by-side comparison.
+
+Debugging/test aid: GTKQT_AUTOQUIT=<ms> exits after that long and, with
+GTKQT_SCREENSHOT=<file.png>, first saves every visible window to a PNG.
+
+
+What is implemented
+-------------------
+
+Core          GtkWidget (show/hide/destroy, sensitivity, size requests,
+              expand/align, tooltips, focus, accelerators, css classes),
+              GtkContainer/GtkBin, GtkWindow, gtk_main/gtk_main_quit (nested),
+              GdkEvent-based "*-event" signals, GTK 1/2 compatibility macros
+              (gtk_signal_connect, GTK_OBJECT, gtk_timeout_add ...)
+Layout        GtkBox (pack_start/pack_end with expand/fill/padding, and
+              GTK 4 append), GtkHBox/VBox, GtkButtonBox, GtkGrid, GtkTable,
+              GtkFixed, GtkFrame, GtkAlignment, GtkEventBox, GtkPaned,
+              GtkNotebook, GtkStack + GtkStackSwitcher, GtkScrolledWindow,
+              GtkViewport, GtkExpander, GtkHeaderBar, GtkSeparator, GtkStatusbar
+Controls      GtkLabel (Pango markup subset, mnemonics, ellipsizing),
+              GtkButton, GtkToggleButton, GtkCheckButton, GtkRadioButton
+              (GSList groups and GTK 4 groups), GtkLinkButton, GtkSwitch,
+              GtkEntry/GtkEditable/GtkEntryBuffer, GtkSpinButton, GtkComboBox,
+              GtkComboBoxText, GtkCombo (GTK 1/2), GtkDropDown + GtkStringList,
+              GtkImage (theme icons, stock ids, files), GtkSpinner,
+              GtkAdjustment (public GTK 2 fields), GtkScale, GtkScrollbar,
+              GtkProgressBar, GtkLevelBar, GtkColorButton
+Text          GtkTextBuffer (a QTextDocument; several views per buffer),
+              GtkTextIter, GtkTextMark, GtkTextTag, GtkTextView
+Lists/trees   GtkListStore, GtkTreeStore (GValue rows, sorting, sort
+              functions), GtkTreePath, GtkTreeView, GtkTreeViewColumn,
+              GtkTreeSelection, text/toggle/pixbuf/progress cell renderers
+              with attributes and cell data functions, "edited"/"toggled",
+              GtkCellLayout combo boxes
+Menus         GtkMenuBar, GtkMenu, GtkMenuItem, check/radio/separator/image
+              items, GtkOptionMenu (GTK 1/2), popup menus, GtkToolbar and tool
+              buttons, GtkAction/GtkActionGroup/GtkUIManager (GTK 2/3),
+              GMenuModel menubars, GtkMenuButton, GtkPopover,
+              GtkPopoverMenu(Bar)
+Dialogs       GtkDialog (+ gtk_dialog_run, GTK 2 vbox/action_area fields),
+              GtkMessageDialog, GtkAboutDialog (+ gtk_show_about_dialog),
+              GtkFileChooserDialog, GtkFileChooserNative, GtkFileFilter, and the
+              GTK 4.10 async GtkFileDialog / GtkAlertDialog
+Application   GtkApplication, GtkApplicationWindow (a GActionMap: "win."
+              actions), set_accels_for_action, menubar from GMenuModel,
+              gtk_widget_insert_action_group, actionable buttons
+Drawing       GtkDrawingArea with cairo: GTK 2 "expose-event" +
+              gdk_cairo_create, GTK 3 "draw", GTK 4 draw functions;
+              GTK 4 event controllers (click, drag, key, motion, scroll, focus)
+GtkBuilder    GTK 2.12+/3/4 XML: properties, enums/flags, packing and layout
+              child properties, internal children, GtkListStore data, <items>,
+              <menu>, action widgets, signals (connect_signals in GTK 2/3,
+              automatic in GTK 4)
+GDK           events, key values (GDK_KEY_* and GTK 2 GDK_*), GdkRGBA/GdkColor
+              parsing, minimal GdkPixbuf, screen size
+
+The test suite (tests/test-api.c) runs the same C tests at all three API
+levels; every example is also run as a smoke test.
+
+
+What is missing (contributions welcome)
+---------------------------------------
+
+* CSS. Style providers are accepted and ignored; only a few style classes
+  ("suggested-action", "destructive-action", "title", "dim-label",
+  "monospace", "error") get a rough Qt equivalent. Apps look like Qt apps.
+* GTK 4 list widgets (GtkListView, GtkColumnView, GtkGridView), GtkListBox,
+  GtkFlowBox, GtkSizeGroup, GtkCalendar, GtkFontChooser, printing,
+  drag-and-drop and the clipboard APIs.
+* Pango as an API (pango_layout_* for text in cairo drawing) and most of
+  GdkPixbuf.
+* GTK 2 GDK drawing primitives (gdk_draw_*, GdkGC). gdk_cairo_create works
+  inside expose handlers only.
+* Text offsets are UTF-16 positions (only differs from GTK for characters
+  outside the Basic Multilingual Plane).
+* Widget margins only apply to containers; stack transitions are ignored.
+
+Layout follows GTK's rules closely enough that windows come out at much the
+same size - see docs/screenshots/range-widgets-gtk2.png (real GTK 2) next to
+range-widgets-qt.png (this library).
+
+
+History
+-------
+
+This repository started as two experiments from 2010-2014: "GTK made Qt"
+(Johan Thelin; shim libraries) and "gqt" (Robin Burchell; one big header).
+They were merged in 2014. Both mapped GTK types straight onto Qt classes
+(typedef QWidget GtkWidget), which only worked when the GTK program was
+compiled as C++.
+
+The 2026 rewrite replaces that with a GObject-based C API so unmodified GTK
+programs compile as C, moves the build to CMake and Qt 6, and extends coverage
+from a handful of GTK 2 calls to large parts of GTK 2, 3 and 4. The original
+GTK 2 examples in examples/gtk2 now build unchanged.
