@@ -206,8 +206,8 @@ void       gtk_ctree_post_recursive (GtkCTree *ctree, GtkCTreeNode *node, GtkCTr
 void       gtk_ctree_pre_recursive (GtkCTree *ctree, GtkCTreeNode *node, GtkCTreeFunc func, gpointer data);
 
 /* ---------- GtkList / GtkListItem ---------- */
-typedef struct _GtkListItem { GtkBin parent_instance; } GtkListItem;
-typedef struct { GtkBinClass parent_class; } GtkListItemClass;
+typedef struct _GtkListItem { GtkItem parent_instance; } GtkListItem;
+typedef struct { GtkItemClass parent_class; } GtkListItemClass;
 typedef struct _GtkList { GtkContainer parent_instance; GList *children; GList *selection; GtkSelectionMode selection_mode; } GtkList;
 typedef struct { GtkContainerClass parent_class; void (*selection_changed) (GtkList *list); void (*select_child) (GtkList *list, GtkWidget *child);
                  void (*unselect_child) (GtkList *list, GtkWidget *child); } GtkListClass;

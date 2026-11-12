@@ -379,7 +379,7 @@ static void menu_item_unplace (GtkContainer *, GtkWidget *) {}
 
 static void menu_item_dispose (GObject *o);
 
-G_DEFINE_TYPE (GtkMenuItem, gtk_menu_item, GTK_TYPE_BIN)
+G_DEFINE_TYPE (GtkMenuItem, gtk_menu_item, GTK_TYPE_ITEM)
 static void gtk_menu_item_init (GtkMenuItem *) {}
 static void gtk_menu_item_class_init (GtkMenuItemClass *klass)
 {

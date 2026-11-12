@@ -1066,15 +1066,27 @@ static QObject *list_item_create (GtkWidget *)
   return q;
 }
 
-G_DEFINE_TYPE (GtkListItem, gtk_list_item, GTK_TYPE_BIN)
+/* GtkItem: menu items and list items; select/deselect/toggle signals */
+G_DEFINE_TYPE (GtkItem, gtk_item, GTK_TYPE_BIN)
+static void gtk_item_init (GtkItem *) {}
+static void gtk_item_class_init (GtkItemClass *klass)
+{
+  GType t = G_TYPE_FROM_CLASS (klass);
+  g_signal_new ("select", t, G_SIGNAL_RUN_FIRST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
+  g_signal_new ("deselect", t, G_SIGNAL_RUN_FIRST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
+  g_signal_new ("toggle", t, (GSignalFlags) (G_SIGNAL_RUN_FIRST | G_SIGNAL_ACTION), 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
+}
+extern "C" {
+void gtk_item_select (GtkItem *item) { g_signal_emit_by_name (item, "select"); }
+void gtk_item_deselect (GtkItem *item) { g_signal_emit_by_name (item, "deselect"); }
+void gtk_item_toggle (GtkItem *item) { g_signal_emit_by_name (item, "toggle"); }
+}
+
+G_DEFINE_TYPE (GtkListItem, gtk_list_item, GTK_TYPE_ITEM)
 static void gtk_list_item_init (GtkListItem *) {}
 static void gtk_list_item_class_init (GtkListItemClass *klass)
 {
   gtkqt_set_create (GTK_WIDGET_CLASS (klass), list_item_create);
-  GType t = G_TYPE_FROM_CLASS (klass);
-  g_signal_new ("select", t, G_SIGNAL_RUN_FIRST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
-  g_signal_new ("deselect", t, G_SIGNAL_RUN_FIRST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
-  g_signal_new ("toggle", t, G_SIGNAL_RUN_FIRST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
 }
 
 static QObject *list_create (GtkWidget *)

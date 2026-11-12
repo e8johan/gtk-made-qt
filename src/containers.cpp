@@ -1361,6 +1361,7 @@ gint gtk_paned_get_position (GtkPaned *paned)
 static QObject *notebook_create (GtkWidget *w)
 {
   auto *t = new QTabWidget;
+  t->setUsesScrollButtons (false);   /* GTK: a notebook asks for room for all its tabs unless scrollable */
   gtkqt_connect (w, t, &QTabWidget::currentChanged, [] (GtkWidget *nb, int index) {
     if (index < 0) return;
     GtkWidget *page = gtk_notebook_get_nth_page (GTK_NOTEBOOK (nb), index);
