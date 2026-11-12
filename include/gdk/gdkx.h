@@ -60,10 +60,14 @@ void       gdk_x11_ungrab_server (void);
 #define GDK_SCREEN_XSCREEN(s)       (gdk_x11_screen_get_xscreen (s))
 #define GDK_DISPLAY_XDISPLAY(d)     (gdk_x11_get_default_xdisplay ())
 #define GDK_FONT_XDISPLAY(font)     (gdk_x11_get_default_xdisplay ())
+XImage    *gdk_x11_image_get_ximage (struct _GdkImage *image);
+#define GDK_IMAGE_XIMAGE(image)     (gdk_x11_image_get_ximage (image))
+#define GDK_IMAGE_XDISPLAY(image)   (gdk_x11_get_default_xdisplay ())
 /* GTK 1: the Display was a variable */
 #define gdk_display                 (gdk_x11_get_default_xdisplay ())
 #define gdk_root_window             (gdk_x11_get_default_root_xwindow ())
 #define gdk_screen                  (gdk_x11_get_default_screen ())
+#define gdk_leader_window           (gdk_x11_get_default_root_xwindow ())
 
 G_END_DECLS
 #ifdef GTKQT_VISIBILITY_PUSHED_GDKX

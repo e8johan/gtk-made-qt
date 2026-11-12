@@ -53,6 +53,25 @@ cairo_surface_t *gtkqt_drawable_target (GdkDrawable *d)
   return nullptr;
 }
 
+/* cairo leaves the unused top byte of RGB24 pixels undefined (pixmaps made
+   from XPM data have 0 there), while Qt's Format_RGB32 needs 0xff: copy and
+   set it, or Qt draws the pixels fully transparent */
+QImage gtkqt_surface_image (cairo_surface_t *s)
+{
+  if (!s || cairo_surface_get_type (s) != CAIRO_SURFACE_TYPE_IMAGE) return QImage ();
+  cairo_surface_flush (s);
+  int w = cairo_image_surface_get_width (s), h = cairo_image_surface_get_height (s);
+  bool opaque = cairo_image_surface_get_format (s) == CAIRO_FORMAT_RGB24;
+  QImage img = QImage (cairo_image_surface_get_data (s), w, h, cairo_image_surface_get_stride (s),
+                       opaque ? QImage::Format_RGB32 : QImage::Format_ARGB32_Premultiplied).copy ();
+  if (opaque)
+    for (int y = 0; y < h; y++) {
+      auto *row = reinterpret_cast<quint32 *> (img.scanLine (y));
+      for (int x = 0; x < w; x++) row[x] |= 0xff000000u;
+    }
+  return img;
+}
+
 static cairo_t *scratch_cr ()
 {
   cairo_surface_t *s = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, 1, 1);
@@ -1767,13 +1786,18 @@ void gtk_item_factory_delete_entries (GtkItemFactory *f, guint n, GtkItemFactory
   for (guint i = 0; i < n; i++) gtk_item_factory_delete_item (f, e[i].path);
 }
 
-void gtk_item_factory_popup_with_data (GtkItemFactory *f, gpointer data, GDestroyNotify destroy, guint, guint, guint button, guint32 time_)
+/* at (x, y) on the screen, as GTK does: programs pass the event's x_root, y_root */
+void gtk_item_factory_popup_with_data (GtkItemFactory *f, gpointer data, GDestroyNotify destroy, guint x, guint y, guint button, guint32 time_)
 {
   IfData *d = ifd (f);
   if (d->popup_destroy) d->popup_destroy (d->popup_data);
   d->popup_data = data;
   d->popup_destroy = destroy;
-  if (GTK_IS_MENU (f->widget)) gtk_menu_popup (GTK_MENU (f->widget), nullptr, nullptr, nullptr, nullptr, button, time_);
+  if (!GTK_IS_MENU (f->widget)) return;
+  if (auto *m = gtkqt_q<QMenu> (f->widget)) {
+    (void) button; (void) time_;
+    m->popup (QPoint ((int) x, (int) y));
+  }
 }
 void gtk_item_factory_popup (GtkItemFactory *f, guint x, guint y, guint button, guint32 time_)
 {
@@ -1794,8 +1818,219 @@ gpointer gtk_item_factory_popup_data_from_widget (GtkWidget *w)
  * ====================================================================== */
 G_DEFINE_TYPE (GtkFileSelection, gtk_file_selection, GTK_TYPE_DIALOG)
 
+/* ---- GTK 1: GtkFileSelection built like GTK 1.2's, so programs can reach
+ * into it (XMMS fills file_list itself, watches dir_list's select_row,
+ * relabels the buttons and adds its own next to them) ---- */
+static QString fs1_dir (GtkFileSelection *fs)
+{
+  const char *d = (const char *) g_object_get_data (G_OBJECT (fs), "gtkqt-fs-dir");
+  return d ? QFile::decodeName (d) : QDir::currentPath () + '/';
+}
+static void fs1_populate (GtkFileSelection *fs, const QString &dir);
+
+static void fs1_history_activate (GtkWidget *item, gpointer fsp)
+{
+  const char *d = (const char *) g_object_get_data (G_OBJECT (item), "gtkqt-fs-path");
+  if (d) fs1_populate (GTK_FILE_SELECTION (fsp), QFile::decodeName (d));
+}
+
+static void fs1_populate (GtkFileSelection *fs, const QString &dirIn)
+{
+  QString dir = QDir::cleanPath (QDir (fs1_dir (fs)).absoluteFilePath (dirIn));
+  QDir qd (dir);
+  if (!qd.exists () || !qd.isReadable ()) { gdk_beep (); return; }
+  if (!dir.endsWith ('/')) dir += '/';
+  g_object_set_data_full (G_OBJECT (fs), "gtkqt-fs-dir", g_strdup (QFile::encodeName (dir).constData ()), g_free);
+  const char *pattern = (const char *) g_object_get_data (G_OBJECT (fs), "gtkqt-fs-pattern");
+  QStringList dirs, files;
+  for (const QFileInfo &fi : qd.entryInfoList (QDir::AllEntries | QDir::Hidden | QDir::System | QDir::NoDotAndDotDot, QDir::Name)) {
+    QByteArray name = QFile::encodeName (fi.fileName ());
+    if (fi.isDir ()) dirs << fi.fileName () + '/';
+    else if (!pattern || !*pattern || g_pattern_match_simple (pattern, name.constData ())) files << fi.fileName ();
+  }
+  GtkCList *dl = GTK_CLIST (fs->dir_list), *fl = GTK_CLIST (fs->file_list);
+  gtk_clist_freeze (dl);
+  gtk_clist_clear (dl);
+  QStringList dall = QStringList { QStringLiteral ("./"), QStringLiteral ("../") } + dirs;
+  for (const QString &d : dall) {
+    QByteArray b = QFile::encodeName (d);
+    gchar *text[1] = { b.data () };
+    gtk_clist_append (dl, text);
+  }
+  gtk_clist_thaw (dl);
+  gtk_clist_freeze (fl);
+  gtk_clist_clear (fl);
+  for (const QString &f : files) {
+    QByteArray b = QFile::encodeName (f);
+    gchar *text[1] = { b.data () };
+    gtk_clist_append (fl, text);
+  }
+  gtk_clist_thaw (fl);
+  QByteArray sel = "Selection: " + QFile::encodeName (dir);
+  gtk_label_set_text (GTK_LABEL (fs->selection_text), sel.constData ());
+  /* the history pulldown: this directory and its parents */
+  GtkWidget *menu = gtk_menu_new ();
+  QString p = dir;
+  while (true) {
+    QByteArray b = QFile::encodeName (p);
+    GtkWidget *item = gtk_menu_item_new_with_label (b.constData ());
+    g_object_set_data_full (G_OBJECT (item), "gtkqt-fs-path", g_strdup (b.constData ()), g_free);
+    g_signal_connect (item, "activate", G_CALLBACK (fs1_history_activate), fs);
+    gtk_menu_shell_append (GTK_MENU_SHELL (menu), item);
+    gtk_widget_show (item);
+    if (p == QStringLiteral ("/")) break;
+    QString up = QDir::cleanPath (p + QStringLiteral ("/.."));
+    p = up.endsWith ('/') ? up : up + '/';
+  }
+  gtk_option_menu_set_menu (GTK_OPTION_MENU (fs->history_pulldown), menu);
+  gtk_option_menu_set_history (GTK_OPTION_MENU (fs->history_pulldown), 0);
+}
+
+static void fs1_dir_select (GtkCList *clist, gint row, gint, GdkEventButton *ev, gpointer fsp)
+{
+  auto *fs = GTK_FILE_SELECTION (fsp);
+  gchar *text = nullptr;
+  if (!gtk_clist_get_text (clist, row, 0, &text) || !text) return;
+  if (ev && ev->type == GDK_2BUTTON_PRESS) {
+    QString d = QFile::decodeName (text);
+    QTimer::singleShot (0, qApp, [fs, d] { if (GTK_WIDGET (fs)->priv && !GTK_WIDGET (fs)->priv->destroyed) fs1_populate (fs, d); });
+  } else {
+    gtk_entry_set_text (GTK_ENTRY (fs->selection_entry), text);
+  }
+}
+
+static void fs1_file_select (GtkCList *clist, gint row, gint, GdkEventButton *ev, gpointer fsp)
+{
+  auto *fs = GTK_FILE_SELECTION (fsp);
+  gchar *text = nullptr;
+  if (!gtk_clist_get_text (clist, row, 0, &text) || !text) return;
+  gtk_entry_set_text (GTK_ENTRY (fs->selection_entry), text);
+  if (ev && ev->type == GDK_2BUTTON_PRESS) gtk_button_clicked (GTK_BUTTON (fs->ok_button));
+}
+
+static void fs1_create_dir (GtkWidget *, gpointer fsp)
+{
+  auto *fs = GTK_FILE_SELECTION (fsp);
+  bool ok = false;
+  QString name = QInputDialog::getText (gtkqt_qw (GTK_WIDGET (fs)), QStringLiteral ("Create Directory"),
+                                        QStringLiteral ("Directory name:"), QLineEdit::Normal, QString (), &ok);
+  if (!ok || name.isEmpty ()) return;
+  if (!QDir (fs1_dir (fs)).mkdir (name))
+    QMessageBox::warning (gtkqt_qw (GTK_WIDGET (fs)), QStringLiteral ("Error"), QStringLiteral ("Unable to create directory \"%1\"").arg (name));
+  fs1_populate (fs, fs1_dir (fs));
+}
+
+static void fs1_delete_file (GtkWidget *, gpointer fsp)
+{
+  auto *fs = GTK_FILE_SELECTION (fsp);
+  QString name = QFile::decodeName (gtk_entry_get_text (GTK_ENTRY (fs->selection_entry)));
+  if (name.isEmpty () || name.endsWith ('/')) return;
+  if (QMessageBox::question (gtkqt_qw (GTK_WIDGET (fs)), QStringLiteral ("Delete File"),
+                             QStringLiteral ("Really delete file \"%1\" ?").arg (name)) != QMessageBox::Yes) return;
+  if (!QDir (fs1_dir (fs)).remove (name))
+    QMessageBox::warning (gtkqt_qw (GTK_WIDGET (fs)), QStringLiteral ("Error"), QStringLiteral ("Unable to delete file \"%1\"").arg (name));
+  gtk_entry_set_text (GTK_ENTRY (fs->selection_entry), "");
+  fs1_populate (fs, fs1_dir (fs));
+}
+
+static void fs1_rename_file (GtkWidget *, gpointer fsp)
+{
+  auto *fs = GTK_FILE_SELECTION (fsp);
+  QString name = QFile::decodeName (gtk_entry_get_text (GTK_ENTRY (fs->selection_entry)));
+  if (name.isEmpty ()) return;
+  bool ok = false;
+  QString to = QInputDialog::getText (gtkqt_qw (GTK_WIDGET (fs)), QStringLiteral ("Rename File"),
+                                      QStringLiteral ("Rename file \"%1\" to:").arg (name), QLineEdit::Normal, name, &ok);
+  if (!ok || to.isEmpty () || to == name) return;
+  if (!QDir (fs1_dir (fs)).rename (name, to))
+    QMessageBox::warning (gtkqt_qw (GTK_WIDGET (fs)), QStringLiteral ("Error"), QStringLiteral ("Unable to rename file \"%1\"").arg (name));
+  QByteArray b = QFile::encodeName (to);
+  gtk_entry_set_text (GTK_ENTRY (fs->selection_entry), b.constData ());
+  fs1_populate (fs, fs1_dir (fs));
+}
+
+static GtkWidget *fs1_list (const char *title, int width)
+{
+  gchar *titles[1] = { const_cast<gchar *> (title) };
+  GtkWidget *l = gtk_clist_new_with_titles (1, titles);
+  gtk_clist_column_titles_passive (GTK_CLIST (l));
+  gtk_widget_set_size_request (l, width, 180);
+  return l;
+}
+
+static void fs1_build (GtkFileSelection *fs)
+{
+  GtkDialog *dlg = GTK_DIALOG (fs);
+  gtk_widget_hide (dlg->action_area);   /* GTK 1.2: OK/Cancel sit in main_vbox */
+  gtk_container_set_border_width (GTK_CONTAINER (fs), 10);
+  fs->main_vbox = (GtkWidget *) g_object_ref_sink (gtk_vbox_new (FALSE, 10));
+  gtk_box_pack_start (GTK_BOX (dlg->vbox), fs->main_vbox, TRUE, TRUE, 0);
+  /* the fileop buttons, shown by default as in GTK 1.2 */
+  fs->button_area = gtk_hbutton_box_new ();
+  gtk_button_box_set_layout (GTK_BUTTON_BOX (fs->button_area), GTK_BUTTONBOX_START);
+  gtk_box_pack_start (GTK_BOX (fs->main_vbox), fs->button_area, FALSE, FALSE, 0);
+  struct { GtkWidget **w; const char *label; GCallback cb; } ops[] = {
+    { &fs->fileop_c_dir, "Create Dir", G_CALLBACK (fs1_create_dir) },
+    { &fs->fileop_del_file, "Delete File", G_CALLBACK (fs1_delete_file) },
+    { &fs->fileop_ren_file, "Rename File", G_CALLBACK (fs1_rename_file) },
+  };
+  for (auto &op : ops) {
+    *op.w = gtk_button_new_with_label (op.label);
+    g_signal_connect (*op.w, "clicked", op.cb, fs);
+    gtk_box_pack_start (GTK_BOX (fs->button_area), *op.w, FALSE, FALSE, 0);
+    gtk_widget_show (*op.w);
+  }
+  gtk_widget_show (fs->button_area);
+  /* history pulldown */
+  GtkWidget *hbox = gtk_hbox_new (FALSE, 0);
+  gtk_box_pack_start (GTK_BOX (fs->main_vbox), hbox, FALSE, FALSE, 0);
+  fs->history_pulldown = gtk_option_menu_new ();
+  gtk_box_pack_start (GTK_BOX (hbox), fs->history_pulldown, FALSE, FALSE, 0);
+  gtk_widget_show_all (hbox);
+  /* directory and file lists */
+  GtkWidget *lists = gtk_hbox_new (FALSE, 5);
+  gtk_box_pack_start (GTK_BOX (fs->main_vbox), lists, TRUE, TRUE, 0);
+  fs->dir_list = fs1_list ("Directories", 150);
+  fs->file_list = fs1_list ("Files", 180);
+  g_signal_connect (fs->dir_list, "select-row", G_CALLBACK (fs1_dir_select), fs);
+  g_signal_connect (fs->file_list, "select-row", G_CALLBACK (fs1_file_select), fs);
+  gtk_box_pack_start (GTK_BOX (lists), fs->dir_list, TRUE, TRUE, 0);
+  gtk_box_pack_start (GTK_BOX (lists), fs->file_list, TRUE, TRUE, 0);
+  gtk_widget_show_all (lists);
+  /* for the program's own widgets */
+  fs->action_area = gtk_hbox_new (FALSE, 0);
+  gtk_box_pack_start (GTK_BOX (fs->main_vbox), fs->action_area, FALSE, FALSE, 0);
+  gtk_widget_show (fs->action_area);
+  /* OK / Cancel */
+  GtkWidget *confirm = gtk_hbutton_box_new ();
+  gtk_button_box_set_layout (GTK_BUTTON_BOX (confirm), GTK_BUTTONBOX_END);
+  gtk_button_box_set_spacing (GTK_BUTTON_BOX (confirm), 5);
+  gtk_box_pack_end (GTK_BOX (fs->main_vbox), confirm, FALSE, FALSE, 0);
+  gtk_container_add (GTK_CONTAINER (confirm), fs->ok_button);
+  gtk_container_add (GTK_CONTAINER (confirm), fs->cancel_button);
+  gtk_widget_set_can_default (fs->ok_button, TRUE);
+  gtk_widget_set_can_default (fs->cancel_button, TRUE);
+  gtk_widget_show_all (confirm);
+  /* selection: label and entry; Return in the entry presses OK */
+  GtkWidget *entry_vbox = gtk_vbox_new (FALSE, 2);
+  gtk_box_pack_end (GTK_BOX (fs->main_vbox), entry_vbox, FALSE, FALSE, 0);
+  fs->selection_text = gtk_label_new ("");
+  gtk_misc_set_alignment (GTK_MISC (fs->selection_text), 0.0, 0.5);
+  gtk_box_pack_start (GTK_BOX (entry_vbox), fs->selection_text, FALSE, FALSE, 0);
+  gtk_box_pack_start (GTK_BOX (entry_vbox), fs->selection_entry, TRUE, TRUE, 0);
+  g_signal_connect_swapped (fs->selection_entry, "activate", G_CALLBACK (gtk_button_clicked), fs->ok_button);
+  gtk_widget_show_all (entry_vbox);
+  gtk_widget_show (fs->main_vbox);
+  gtk_widget_grab_focus (fs->selection_entry);
+  fs1_populate (fs, QDir::currentPath ());
+}
+
 static QObject *file_selection_create (GtkWidget *w)
 {
+  if (gtkqt_api == 1) {   /* GTK 1: a dialog made of GTK widgets, see fs1_build */
+    auto *dk = (GtkWidgetClass *) g_type_class_peek (GTK_TYPE_DIALOG);
+    return ((GtkQtCreateFunc) dk->gtkqt_create) (w);
+  }
   auto *fd = new QFileDialog;
   fd->setProperty ("gtkqt-self-drawn", true);
   fd->setOption (QFileDialog::DontUseNativeDialog, true);
@@ -1821,9 +2056,10 @@ static QObject *file_selection_create (GtkWidget *w)
 
 static void gtk_file_selection_init (GtkFileSelection *fs)
 {
-  fs->ok_button = (GtkWidget *) g_object_ref_sink (gtk_button_new_from_stock ("gtk-ok"));
-  fs->cancel_button = (GtkWidget *) g_object_ref_sink (gtk_button_new_from_stock ("gtk-cancel"));
-  fs->main_vbox = (GtkWidget *) g_object_ref_sink (gtk_box_new (GTK_ORIENTATION_VERTICAL, 0));
+  bool gtk1 = gtkqt_api == 1;   /* GTK 1.2 labels them OK / Cancel, without stock icons */
+  fs->ok_button = (GtkWidget *) g_object_ref_sink (gtk1 ? gtk_button_new_with_label ("OK") : gtk_button_new_from_stock ("gtk-ok"));
+  fs->cancel_button = (GtkWidget *) g_object_ref_sink (gtk1 ? gtk_button_new_with_label ("Cancel") : gtk_button_new_from_stock ("gtk-cancel"));
+  if (!gtk1) fs->main_vbox = (GtkWidget *) g_object_ref_sink (gtk_box_new (GTK_ORIENTATION_VERTICAL, 0));
   fs->selection_entry = (GtkWidget *) g_object_ref_sink (gtk_entry_new ());
 }
 
@@ -1831,6 +2067,7 @@ static void file_selection_constructed (GObject *o)
 {
   G_OBJECT_CLASS (gtk_file_selection_parent_class)->constructed (o);
   auto *fs = GTK_FILE_SELECTION (o);
+  if (gtkqt_api == 1) { fs1_build (fs); return; }
   fs->action_area = fs->button_area = GTK_DIALOG (o)->action_area;
   g_object_set_data (G_OBJECT (o), "gtkqt-accept-id", GINT_TO_POINTER (GTK_RESPONSE_OK));
   g_object_set_data (G_OBJECT (o), "gtkqt-cancel-id", GINT_TO_POINTER (GTK_RESPONSE_CANCEL));
@@ -1865,6 +2102,14 @@ GtkWidget *gtk_file_selection_new (const gchar *title)
 
 void gtk_file_selection_set_filename (GtkFileSelection *fs, const gchar *filename)
 {
+  if (gtkqt_api == 1 && fs->file_list) {
+    QString f = QFile::decodeName (filename ? filename : "");
+    int slash = f.lastIndexOf ('/');
+    if (slash >= 0) fs1_populate (fs, slash == 0 ? QStringLiteral ("/") : f.left (slash));
+    QByteArray base = QFile::encodeName (f.mid (slash + 1));
+    gtk_entry_set_text (GTK_ENTRY (fs->selection_entry), base.constData ());
+    return;
+  }
   if (auto *fd = gtkqt_q<QFileDialog> (GTK_WIDGET (fs))) {
     QString f = QFile::decodeName (filename);
     if (f.endsWith ('/')) fd->setDirectory (f);
@@ -1879,6 +2124,13 @@ void gtk_file_selection_set_filename (GtkFileSelection *fs, const gchar *filenam
 
 const gchar *gtk_file_selection_get_filename (GtkFileSelection *fs)
 {
+  if (gtkqt_api == 1 && fs->file_list) {   /* the directory + the entry, as GTK 1.2 */
+    QString text = QFile::decodeName (gtk_entry_get_text (GTK_ENTRY (fs->selection_entry)));
+    if (text.startsWith (QStringLiteral ("~/"))) text = QDir::homePath () + text.mid (1);
+    QString full = text.startsWith ('/') ? text : fs1_dir (fs) + text;
+    g_object_set_data_full (G_OBJECT (fs), "gtkqt-filename", g_strdup (QFile::encodeName (full).constData ()), g_free);
+    return (const gchar *) g_object_get_data (G_OBJECT (fs), "gtkqt-filename");
+  }
   if (auto *fd = gtkqt_q<QFileDialog> (GTK_WIDGET (fs)); fd && fd->isVisible ()) {
     QStringList sel = fd->selectedFiles ();
     if (!sel.isEmpty ())
@@ -1891,6 +2143,14 @@ const gchar *gtk_file_selection_get_filename (GtkFileSelection *fs)
 gchar **gtk_file_selection_get_selections (GtkFileSelection *fs)
 {
   QStringList sel;
+  if (gtkqt_api == 1 && fs->file_list) {
+    for (GList *l = GTK_CLIST (fs->file_list)->selection; l; l = l->next) {
+      gchar *t = nullptr;
+      if (gtk_clist_get_text (GTK_CLIST (fs->file_list), GPOINTER_TO_INT (l->data), 0, &t) && t)
+        sel << fs1_dir (fs) + QFile::decodeName (t);
+    }
+    if (sel.isEmpty ()) sel << QFile::decodeName (gtk_file_selection_get_filename (fs));
+  } else
   if (auto *fd = gtkqt_q<QFileDialog> (GTK_WIDGET (fs))) sel = fd->selectedFiles ();
   gchar **v = g_new0 (gchar *, sel.size () + 1);
   for (int i = 0; i < sel.size (); i++) v[i] = g_strdup (QFile::encodeName (sel[i]).constData ());
@@ -1899,14 +2159,26 @@ gchar **gtk_file_selection_get_selections (GtkFileSelection *fs)
 
 void gtk_file_selection_set_select_multiple (GtkFileSelection *fs, gboolean multiple)
 {
+  if (fs->file_list) gtk_clist_set_selection_mode (GTK_CLIST (fs->file_list), multiple ? GTK_SELECTION_MULTIPLE : GTK_SELECTION_SINGLE);
   if (auto *fd = gtkqt_q<QFileDialog> (GTK_WIDGET (fs))) fd->setFileMode (multiple ? QFileDialog::ExistingFiles : QFileDialog::AnyFile);
 }
 void gtk_file_selection_complete (GtkFileSelection *fs, const gchar *pattern)
 {
+  if (gtkqt_api == 1 && fs->file_list) {
+    QString p = QFile::decodeName (pattern ? pattern : "");
+    int slash = p.lastIndexOf ('/');
+    QString name = p.mid (slash + 1);
+    bool wild = name.contains ('*') || name.contains ('?');
+    g_object_set_data_full (G_OBJECT (fs), "gtkqt-fs-pattern", wild ? g_strdup (QFile::encodeName (name).constData ()) : nullptr, g_free);
+    if (slash >= 0) fs1_populate (fs, slash == 0 ? QStringLiteral ("/") : p.left (slash));
+    else fs1_populate (fs, fs1_dir (fs));
+    gtk_entry_set_text (GTK_ENTRY (fs->selection_entry), QFile::encodeName (name).constData ());
+    return;
+  }
   if (auto *fd = gtkqt_q<QFileDialog> (GTK_WIDGET (fs))) fd->setNameFilter (gtkqt_str (pattern));
 }
-void gtk_file_selection_show_fileop_buttons (GtkFileSelection *) {}
-void gtk_file_selection_hide_fileop_buttons (GtkFileSelection *) {}
+void gtk_file_selection_show_fileop_buttons (GtkFileSelection *fs) { if (fs->button_area && gtkqt_api == 1) gtk_widget_show (fs->button_area); }
+void gtk_file_selection_hide_fileop_buttons (GtkFileSelection *fs) { if (fs->button_area && gtkqt_api == 1) gtk_widget_hide (fs->button_area); }
 
 void gtk_file_chooser_set_extra_widget (GtkFileChooser *chooser, GtkWidget *extra)
 {

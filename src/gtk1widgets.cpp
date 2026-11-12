@@ -125,6 +125,7 @@ struct CListCell { QString text; GdkPixmap *pixmap = nullptr; GdkBitmap *mask = 
 struct CListRowData {
   GtkCListRow row = {};          /* must be first: GTK_CLIST_ROW (list) points here */
   QVector<CListCell> cells;
+  QVector<GtkCell> gcells;       /* GTK 1's public view: row->cell[column] */
   QTreeWidgetItem *item = nullptr;
   GtkCTreeRow *tree = nullptr;   /* GtkCTree rows */
 };
@@ -133,6 +134,8 @@ struct CListData {
   int frozen = 0;
   bool syncing = false;
   bool auto_sort = false;
+  bool in_press = false;   /* selection changes now come from this button press */
+  GdkEventButton press = {};
 };
 static CListData *cld (GtkCList *c) { return static_cast<CListData *> (c->priv); }
 static QTreeWidget *ctw (GtkCList *c) { return gtkqt_q<QTreeWidget> (GTK_WIDGET (c)); }
@@ -155,8 +158,28 @@ static void cell_free (CListCell &cell)
   cell.pixmap = cell.mask = nullptr;
 }
 
+static void row_sync_cells (CListRowData *r)
+{
+  if (r->gcells.size () != r->cells.size ()) {
+    for (GtkCell &g : r->gcells) if (g.type != GTK_CELL_PIXMAP) g_free (g.u.text);
+    r->gcells = QVector<GtkCell> (r->cells.size ());
+    for (GtkCell &g : r->gcells) memset (&g, 0, sizeof g);
+  }
+  for (int i = 0; i < r->cells.size (); i++) {
+    GtkCell &g = r->gcells[i];
+    const CListCell &c = r->cells[i];
+    if (g.type != GTK_CELL_PIXMAP) g_free (g.u.text);
+    memset (&g.u, 0, sizeof g.u);
+    if (c.pixmap && c.text.isEmpty ()) { g.type = GTK_CELL_PIXMAP; g.u.pm.pixmap = c.pixmap; g.u.pm.mask = c.mask; }
+    else if (c.pixmap) { g.type = GTK_CELL_PIXTEXT; g.u.pt.text = g_strdup (c.text.toUtf8 ().constData ()); g.u.pt.pixmap = c.pixmap; g.u.pt.mask = c.mask; }
+    else { g.type = GTK_CELL_TEXT; g.u.text = g_strdup (c.text.toUtf8 ().constData ()); }
+  }
+  r->row.cell = r->gcells.data ();
+}
+
 static void row_update_item (GtkCList *c, CListRowData *r)
 {
+  row_sync_cells (r);
   for (int col = 0; col < r->cells.size (); col++) {
     r->item->setText (col, r->cells[col].text);
     r->item->setIcon (col, r->cells[col].pixmap ? QIcon (gtkqt_qpixmap (r->cells[col].pixmap, r->cells[col].mask)) : QIcon ());
@@ -197,9 +220,66 @@ static void clist_qt_selection_changed (GtkWidget *w)
   }
   QTreeWidget *tw = ctw (c);
   int col = tw ? qMax (0, tw->currentColumn ()) : 0;
-  for (int i : unsel) g_signal_emit_by_name (c, "unselect-row", i, col, nullptr);
-  for (int i : sel) g_signal_emit_by_name (c, "select-row", i, col, nullptr);
+  /* as GTK 1, a selection made with the mouse comes with its button event */
+  GdkEventButton *ev = d->in_press ? &d->press : nullptr;
+  for (int i : unsel) g_signal_emit_by_name (c, "unselect-row", i, col, ev);
+  for (int i : sel) g_signal_emit_by_name (c, "select-row", i, col, ev);
 }
+
+/* records the button event behind a selection; a double click selects the
+   row again with a GDK_2BUTTON_PRESS event, which GTK 1 programs (and file
+   selections) take as "open" */
+class CListMouse : public QObject {
+public:
+  CListMouse (GtkWidget *w, QObject *parent) : QObject (parent), w (w) {}
+protected:
+  bool eventFilter (QObject *o, QEvent *e) override
+  {
+    auto t = e->type ();
+    if (t != QEvent::MouseButtonPress && t != QEvent::MouseButtonDblClick && t != QEvent::MouseButtonRelease) return false;
+    CListData *d = GTK_IS_CLIST (w) ? cld (GTK_CLIST (w)) : nullptr;
+    if (!d) return false;
+    if (t == QEvent::MouseButtonRelease) { d->in_press = false; return false; }
+    auto *me = static_cast<QMouseEvent *> (e);
+    auto *vp = static_cast<QWidget *> (o);
+#if QT_VERSION >= QT_VERSION_CHECK (6, 0, 0)
+    QPointF lp = me->position (), gp = me->globalPosition ();
+#else
+    QPointF lp = me->localPos (), gp = me->screenPos ();
+#endif
+    d->press = {};
+    d->press.type = t == QEvent::MouseButtonDblClick ? GDK_2BUTTON_PRESS : GDK_BUTTON_PRESS;
+    d->press.window = w->window;
+    d->press.time = me->timestamp ();
+    d->press.x = lp.x ();
+    d->press.y = lp.y ();
+    d->press.x_root = gp.x ();
+    d->press.y_root = gp.y ();
+    d->press.button = me->button () == Qt::RightButton ? 3 : me->button () == Qt::MiddleButton ? 2 : 1;
+    d->press.state = gtkqt_qt_mods_to_gdk (me->modifiers (), me->buttons ());
+    d->in_press = true;
+    if (t == QEvent::MouseButtonDblClick) {
+      QTreeWidget *tw = ctw (GTK_CLIST (w));
+      QTreeWidgetItem *it = tw ? tw->itemAt (lp.toPoint ()) : nullptr;
+      int row = -1;
+      for (int i = 0; it && i < d->rows.size (); i++) if (d->rows[i]->item == it) row = i;
+      if (row >= 0) {
+        int col = qMax (0, tw->columnAt (lp.toPoint ().x ()));
+        GdkEventButton ev = d->press;
+        GtkWidget *cw = w;
+        g_object_ref (cw);
+        QTimer::singleShot (0, vp, [cw, row, col, ev] () mutable {   /* after Qt has handled the click */
+          if (cw->priv && !cw->priv->destroyed && row < GTK_CLIST (cw)->rows)
+            g_signal_emit_by_name (cw, "select-row", row, col, &ev);
+          g_object_unref (cw);
+        });
+      }
+    }
+    return false;
+  }
+private:
+  GtkWidget *w;
+};
 
 static void clist_real_select (GtkCList *c, gint row, gint, GdkEvent *)
 {
@@ -247,6 +327,7 @@ static QObject *clist_create (GtkWidget *w)
     g_signal_emit_by_name (cw, "click-column", col);
   });
   /* GTK 1 programs watch button presses on the list itself */
+  tw->viewport ()->installEventFilter (new CListMouse (w, tw));
   tw->viewport ()->installEventFilter (gtkqt_bridge (w));
   return tw;
 }
@@ -264,6 +345,7 @@ static void row_free (CListRowData *r)
 {
   if (r->row.destroy) r->row.destroy (r->row.data);
   for (CListCell &cell : r->cells) cell_free (cell);
+  for (GtkCell &g : r->gcells) if (g.type != GTK_CELL_PIXMAP) g_free (g.u.text);
   delete r->tree;
   delete r;
 }
@@ -312,7 +394,6 @@ static CListRowData *clist_new_row (GtkCList *c, gchar *text[])
   r->row.selectable = 1;
   r->cells.resize (c->columns);
   for (int i = 0; i < c->columns; i++) r->cells[i].text = text && text[i] ? QString::fromUtf8 (text[i]) : QString ();
-  r->row.cell = r->cells.data ();
   r->item = new QTreeWidgetItem;
   return r;
 }
@@ -503,8 +584,8 @@ void gtk_clist_set_selection_mode (GtkCList *c, GtkSelectionMode mode)
   c->selection_mode = mode;
   if (QTreeWidget *tw = ctw (c))
     tw->setSelectionMode (mode == GTK_SELECTION_NONE ? QAbstractItemView::NoSelection
-                          : mode == GTK_SELECTION_MULTIPLE ? QAbstractItemView::MultiSelection
-                          : (int) mode == 4 ? QAbstractItemView::ExtendedSelection : QAbstractItemView::SingleSelection);
+                          : mode == GTK_SELECTION_MULTIPLE ? QAbstractItemView::ExtendedSelection   /* = GTK_SELECTION_EXTENDED */
+                          : QAbstractItemView::SingleSelection);
 }
 void gtk_clist_set_selectable (GtkCList *c, gint row, gboolean selectable)
 {

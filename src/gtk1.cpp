@@ -242,6 +242,67 @@ void gtk_object_get (GtkObject *object, const gchar *first, ...)
   va_end (ap);
 }
 
+static QByteArray arg_name (const gchar *name)
+{
+  QByteArray n (name);
+  int sep = n.indexOf ("::");
+  if (sep >= 0) n = n.mid (sep + 2);
+  return n.replace ('_', '-');
+}
+
+void gtk_object_arg_get (GtkObject *object, GtkArg *arg, gpointer)
+{
+  QByteArray n = arg_name (arg->name);
+  memset (&arg->d, 0, sizeof arg->d);
+  arg->type = G_TYPE_INVALID;
+  if (n == "parent" && GTK_IS_WIDGET (object)) { arg->type = GTK_TYPE_WIDGET; arg->d.object_data = (GtkObject *) GTK_WIDGET (object)->parent; return; }
+  if (n == "user-data") { arg->type = G_TYPE_POINTER; arg->d.pointer_data = g_object_get_data (G_OBJECT (object), "user_data"); return; }
+  GParamSpec *pspec = g_object_class_find_property (G_OBJECT_GET_CLASS (object), n.constData ());
+  if (!pspec) return;
+  GValue v = G_VALUE_INIT;
+  g_value_init (&v, pspec->value_type);
+  g_object_get_property (G_OBJECT (object), n.constData (), &v);
+  arg->type = pspec->value_type;
+  switch (G_TYPE_FUNDAMENTAL (pspec->value_type)) {
+  case G_TYPE_BOOLEAN: arg->d.bool_data = g_value_get_boolean (&v); break;
+  case G_TYPE_INT: arg->d.int_data = g_value_get_int (&v); break;
+  case G_TYPE_UINT: arg->d.uint_data = g_value_get_uint (&v); break;
+  case G_TYPE_LONG: arg->d.long_data = g_value_get_long (&v); break;
+  case G_TYPE_ULONG: arg->d.ulong_data = g_value_get_ulong (&v); break;
+  case G_TYPE_FLOAT: arg->d.float_data = g_value_get_float (&v); break;
+  case G_TYPE_DOUBLE: arg->d.double_data = g_value_get_double (&v); break;
+  case G_TYPE_ENUM: arg->d.int_data = g_value_get_enum (&v); break;
+  case G_TYPE_FLAGS: arg->d.uint_data = g_value_get_flags (&v); break;
+  case G_TYPE_STRING: arg->d.string_data = g_value_dup_string (&v); break;
+  case G_TYPE_OBJECT: arg->d.object_data = (GtkObject *) g_value_get_object (&v); break;
+  case G_TYPE_POINTER: arg->d.pointer_data = g_value_get_pointer (&v); break;
+  default: break;
+  }
+  g_value_unset (&v);
+}
+
+void gtk_object_arg_set (GtkObject *object, GtkArg *arg, gpointer)
+{
+  QByteArray n = arg_name (arg->name);
+  GParamSpec *pspec = g_object_class_find_property (G_OBJECT_GET_CLASS (object), n.constData ());
+  if (!pspec) return;
+  GValue v = G_VALUE_INIT;
+  g_value_init (&v, pspec->value_type);
+  switch (G_TYPE_FUNDAMENTAL (pspec->value_type)) {
+  case G_TYPE_BOOLEAN: g_value_set_boolean (&v, arg->d.bool_data); break;
+  case G_TYPE_INT: g_value_set_int (&v, arg->d.int_data); break;
+  case G_TYPE_UINT: g_value_set_uint (&v, arg->d.uint_data); break;
+  case G_TYPE_FLOAT: g_value_set_float (&v, arg->d.float_data); break;
+  case G_TYPE_DOUBLE: g_value_set_double (&v, arg->d.double_data); break;
+  case G_TYPE_ENUM: g_value_set_enum (&v, arg->d.int_data); break;
+  case G_TYPE_STRING: g_value_set_string (&v, arg->d.string_data); break;
+  case G_TYPE_OBJECT: g_value_set_object (&v, arg->d.object_data); break;
+  default: g_value_unset (&v); return;
+  }
+  g_object_set_property (G_OBJECT (object), n.constData (), &v);
+  g_value_unset (&v);
+}
+
 GtkObject *gtk_object_new (GtkType type, const gchar *first, ...)
 {
   GObject *o = (GObject *) g_object_new (gtkqt_type_fix (type), nullptr);
@@ -308,6 +369,7 @@ void gtk_widget_set_uposition (GtkWidget *widget, gint x, gint y)
   if (y == -1) y = qw->y ();
   if (x == -2 || y == -2) return;
   qw->move (x, y);
+  if (GTK_IS_WINDOW (widget)) g_object_set_data (G_OBJECT (widget), "gtkqt-positioned", GINT_TO_POINTER (1));
 }
 
 static QRegion mask_region (GdkBitmap *mask, int ox, int oy)
@@ -436,10 +498,114 @@ void gtk_container_set_focus_vadjustment (GtkContainer *, GtkAdjustment *) {}
 void gtk_container_set_focus_hadjustment (GtkContainer *, GtkAdjustment *) {}
 void gtk_grab_add (GtkWidget *) {}
 void gtk_grab_remove (GtkWidget *) {}
-GdkWindow *gdk_selection_owner_get (GdkAtom) { return nullptr; }
-void gtk_selection_add_target (GtkWidget *, GdkAtom, GdkAtom, guint) {}
-gboolean gtk_selection_owner_set (GtkWidget *, GdkAtom, guint32) { return TRUE; }
-gboolean gtk_selection_convert (GtkWidget *, GdkAtom, GdkAtom, guint32) { return FALSE; }
+/* Selections: an owner's text goes to Qt's clipboard (PRIMARY to the X
+ * selection where Qt has one) when it claims the selection; it loses it,
+ * with a "selection-clear-event", when another owner or program claims it. */
+static QHash<quintptr, GtkWidget *> selection_owners;
+static bool selection_exporting = false;
+
+static QClipboard::Mode selection_mode (GdkAtom selection)
+{
+  QClipboard *cb = QGuiApplication::clipboard ();
+  return selection == GDK_SELECTION_PRIMARY && cb->supportsSelection () ? QClipboard::Selection : QClipboard::Clipboard;
+}
+
+static void selection_owner_gone (gpointer key, GObject *)
+{
+  selection_owners.remove ((quintptr) key);
+}
+
+static void selection_clear (GtkWidget *owner, GdkAtom selection)
+{
+  g_object_weak_unref (G_OBJECT (owner), selection_owner_gone, (gpointer) (quintptr) selection);
+  selection_owners.remove ((quintptr) selection);
+  if (!owner->priv || owner->priv->destroyed) return;
+  GdkEvent ev = {};
+  ev.selection.type = GDK_SELECTION_CLEAR;
+  ev.selection.window = owner->window;
+  ev.selection.selection = selection;
+  ev.selection.time = GDK_CURRENT_TIME;
+  gtkqt_emit_event (owner, &ev, "selection-clear-event");
+}
+
+GdkWindow *gdk_selection_owner_get (GdkAtom selection)
+{
+  GtkWidget *w = selection_owners.value ((quintptr) selection);
+  return w ? w->window : nullptr;
+}
+
+void gtk_selection_add_target (GtkWidget *widget, GdkAtom selection, GdkAtom target, guint info)
+{
+  if (!widget) return;
+  QByteArray key = "gtkqt-sel-info-" + QByteArray::number ((quintptr) selection) + "-" + QByteArray::number ((quintptr) target);
+  g_object_set_data (G_OBJECT (widget), key.constData (), GUINT_TO_POINTER (info));
+}
+
+gboolean gtk_selection_owner_set (GtkWidget *widget, GdkAtom selection, guint32 time_)
+{
+  GtkWidget *old = selection_owners.value ((quintptr) selection);
+  if (old == widget) return TRUE;
+  if (old) selection_clear (old, selection);
+  if (!widget) return TRUE;
+  selection_owners.insert ((quintptr) selection, widget);
+  g_object_weak_ref (G_OBJECT (widget), selection_owner_gone, (gpointer) (quintptr) selection);
+  /* ask the owner for its text now: Qt's clipboard holds data, not a callback */
+  GdkAtom target = GDK_TARGET_STRING;
+  QByteArray key = "gtkqt-sel-info-" + QByteArray::number ((quintptr) selection) + "-" + QByteArray::number ((quintptr) target);
+  GtkSelectionData sd = {};
+  sd.selection = selection;
+  sd.target = target;
+  sd.length = -1;
+  g_signal_emit_by_name (widget, "selection-get", &sd, GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (widget), key.constData ())),
+                         (guint) time_);
+  if (sd.data && sd.length >= 0) {
+    QClipboard *cb = QGuiApplication::clipboard ();
+    static bool watching = false;
+    if (!watching) {   /* someone else took the selection: our owner loses it */
+      watching = true;
+      QObject::connect (cb, &QClipboard::changed, cb, [] (QClipboard::Mode mode) {
+        if (selection_exporting) return;
+        for (GdkAtom s : { GDK_SELECTION_PRIMARY, GDK_SELECTION_CLIPBOARD })
+          if (selection_mode (s) == mode)
+            if (GtkWidget *o = selection_owners.value ((quintptr) s)) selection_clear (o, s);
+      });
+    }
+    selection_exporting = true;
+    cb->setText (QString::fromUtf8 ((const char *) sd.data, sd.length), selection_mode (selection));
+    selection_exporting = false;
+  }
+  g_free (sd.data);
+  return TRUE;
+}
+/* the selection's text from Qt's clipboard, delivered as "selection-received"
+   from the main loop as on X; anything but text arrives with length -1 */
+gboolean gtk_selection_convert (GtkWidget *widget, GdkAtom selection, GdkAtom target, guint32 time_)
+{
+  if (!widget) return FALSE;
+  QClipboard *cb = QGuiApplication::clipboard ();
+  QClipboard::Mode mode = selection_mode (selection);
+  gchar *tname = gdk_atom_name (target);
+  bool text = tname && (!strcmp (tname, "STRING") || !strcmp (tname, "UTF8_STRING") || !strcmp (tname, "TEXT") ||
+                        !strcmp (tname, "COMPOUND_TEXT") || !strcmp (tname, "text/plain"));
+  g_free (tname);
+  QByteArray bytes = text ? cb->text (mode).toUtf8 () : QByteArray ();
+  g_object_ref (widget);
+  QTimer::singleShot (0, qApp, [widget, selection, target, time_, text, bytes] {
+    if (widget->priv && !widget->priv->destroyed) {
+      GtkSelectionData sd = {};
+      sd.selection = selection;
+      sd.target = target;
+      sd.type = text && !bytes.isEmpty () ? GDK_SELECTION_TYPE_STRING : GDK_NONE;
+      sd.format = 8;
+      QByteArray copy = bytes;
+      sd.data = text && !bytes.isEmpty () ? (guchar *) copy.data () : nullptr;   /* NUL-terminated, as GTK's */
+      sd.length = text && !bytes.isEmpty () ? copy.size () : -1;
+      g_signal_emit_by_name (widget, "selection-received", &sd, (guint) time_);
+    }
+    g_object_unref (widget);
+  });
+  return TRUE;
+}
 
 } /* extern "C" */
 
@@ -484,6 +650,16 @@ void gdk_window_destroy (GdkWindow *window)
   if (!window) return;
   if (window->widget && window->widget->window == window) return;   /* the widget owns it */
   g_object_unref (window);
+}
+
+void gdk_window_reparent (GdkWindow *window, GdkWindow *new_parent, gint x, gint y)
+{
+  QWidget *qw = win_qwidget (window), *np = new_parent ? win_qwidget (new_parent) : nullptr;
+  if (!qw || qw == np) return;
+  bool vis = qw->isVisible ();
+  qw->setParent (np);
+  qw->move (x, y);
+  if (vis) qw->show ();
 }
 
 void gdk_window_set_user_data (GdkWindow *window, gpointer user_data)
@@ -559,10 +735,7 @@ void gdk_window_set_icon (GdkWindow *window, GdkWindow *, GdkPixmap *pixmap, Gdk
   QWidget *qw = win_toplevel (window);
   if (!qw || !pixmap || !pixmap->surface) return;
   cairo_surface_t *s = pixmap->surface;
-  cairo_surface_flush (s);
-  QImage img (cairo_image_surface_get_data (s), cairo_image_surface_get_width (s), cairo_image_surface_get_height (s),
-              cairo_image_surface_get_stride (s), QImage::Format_RGB32);
-  QPixmap pm = QPixmap::fromImage (img.copy ());
+  QPixmap pm = QPixmap::fromImage (gtkqt_surface_image (s));
   if (mask) pm.setMask (QBitmap::fromImage (QImage ()));   /* mask applied below */
   if (mask && mask->surface) {
     QRegion r = mask_region (mask, 0, 0);
@@ -647,7 +820,7 @@ void gdk_window_begin_resize_drag (GdkWindow *window, GdkWindowEdge edge, gint, 
 }
 void gdk_window_remove_filter (GdkWindow *, gpointer, gpointer) {}
 void gdk_add_client_message_filter (GdkAtom, gpointer, gpointer) {}
-void gdk_property_change (GdkWindow *, GdkAtom, GdkAtom, gint, gint, const guchar *, gint) {}
+void gdk_property_change (GdkWindow *, GdkAtom, GdkAtom, gint, GdkPropMode, const guchar *, gint) {}
 void gdk_set_sm_client_id (const gchar *) {}
 void gdk_error_trap_push (void) {}
 gint gdk_error_trap_pop (void) { return 0; }

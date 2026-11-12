@@ -21,7 +21,11 @@ GTKQT_SIMPLE_TYPE (GtkMenu, GtkMenuShell)
 #define GTK_TYPE_MENU        (gtk_menu_get_type ())
 #define GTK_MENU(o)          (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_MENU, GtkMenu))
 #define GTK_IS_MENU(o)       (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_MENU))
+#if GTKQT_API_VERSION == 1
+typedef void (*GtkMenuPositionFunc) (GtkMenu *menu, gint *x, gint *y, gpointer user_data);   /* GTK 1.2: no push_in */
+#else
 typedef void (*GtkMenuPositionFunc) (GtkMenu *menu, gint *x, gint *y, gboolean *push_in, gpointer user_data);
+#endif
 GType      gtk_menu_shell_get_type (void) G_GNUC_CONST;
 GType      gtk_menu_bar_get_type (void) G_GNUC_CONST;
 GType      gtk_menu_get_type (void) G_GNUC_CONST;

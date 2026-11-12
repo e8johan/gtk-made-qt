@@ -650,8 +650,9 @@ void gtkqt_sync_visible (GtkWidget *w)
     }
     /* Pages of a QStackedWidget (GtkStack, GtkNotebook) are shown and hidden
      * by the stack itself; forcing them visible would overlap the pages. */
-    if (qobject_cast<QStackedWidget *> (qw->parentWidget ())) {
+    if (auto *stack = qobject_cast<QStackedWidget *> (qw->parentWidget ())) {
       if (!vis) qw->hide ();
+      else if (stack->currentWidget () == qw) qw->show ();   /* added hidden, shown later (show_all) */
       return;
     }
     if (vis && qw->isWindow () && GTK_IS_WINDOW (w))
@@ -670,6 +671,12 @@ void gtkqt_apply_size_request (GtkWidget *w)
   GtkWidgetPrivate *p = w->priv;
   qw->setMinimumSize (QSize (p->width_request > 0 ? p->width_request : 0,
                              p->height_request > 0 ? p->height_request : 0));
+  /* a fixed-size window without children (it is drawn on): the request is its size */
+  if (qw->isWindow () && g_object_get_data (G_OBJECT (w), "gtkqt-fixed-size") && GTK_IS_CONTAINER (w) &&
+      !GTK_BIN (w)->child && p->width_request > 0 && p->height_request > 0) {
+    if (qw->layout ()) qw->layout ()->setSizeConstraint (QLayout::SetDefaultConstraint);   /* an empty layout would make it 0x0 */
+    qw->setFixedSize (p->width_request, p->height_request);
+  }
 }
 
 static void gtk_widget_init (GtkWidget *w)
@@ -789,6 +796,14 @@ static void gtk_widget_class_init (GtkWidgetClass *klass)
   widget_signals[SIG_FOCUS_IN] = sigev ("focus-in-event", G_STRUCT_OFFSET (GtkWidgetClass, focus_in_event));
   widget_signals[SIG_FOCUS_OUT] = sigev ("focus-out-event", G_STRUCT_OFFSET (GtkWidgetClass, focus_out_event));
   widget_signals[SIG_EXPOSE] = sigev ("expose-event", G_STRUCT_OFFSET (GtkWidgetClass, expose_event));
+  sigev ("client-event", 0);   /* X client messages: never delivered without X */
+  /* answer to gtk_selection_convert (GtkSelectionData *, guint time) */
+  g_signal_new ("selection-received", t, G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 2,
+                G_TYPE_POINTER, G_TYPE_UINT);
+  /* the owner side (gtk_selection_owner_set): (GtkSelectionData *, guint info, guint time) */
+  g_signal_new ("selection-get", t, G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 3,
+                G_TYPE_POINTER, G_TYPE_UINT, G_TYPE_UINT);
+  sigev ("selection-clear-event", 0);
   /* GTK 2 drag-and-drop and style signals (gtk2.cpp emits them) */
   g_signal_new ("style-set", t, G_SIGNAL_RUN_FIRST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 1, G_TYPE_OBJECT);
   g_signal_new ("state-changed", t, G_SIGNAL_RUN_FIRST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 1, G_TYPE_INT);
@@ -885,6 +900,8 @@ static void gtk_widget_class_init (GtkWidgetClass *klass)
 gboolean gtkqt_emit_event (GtkWidget *w, GdkEvent *ev, const char *signal_name)
 {
   gboolean handled = FALSE;
+  /* handlers may destroy the widget (as GTK, keep it alive meanwhile) */
+  g_object_ref (w);
   g_signal_emit (w, widget_signals[SIG_EVENT], 0, ev, &handled);
   if (!handled && signal_name && !w->priv->destroyed) {
     guint id = g_signal_lookup (signal_name, G_OBJECT_TYPE (w));
@@ -892,6 +909,7 @@ gboolean gtkqt_emit_event (GtkWidget *w, GdkEvent *ev, const char *signal_name)
   }
   if (!w->priv->destroyed)
     g_signal_emit (w, widget_signals[SIG_EVENT_AFTER], 0, ev);
+  g_object_unref (w);
   return handled;
 }
 
@@ -983,6 +1001,7 @@ bool GtkQtBridge::eventFilter (QObject *watched, QEvent *e)
   QWidget *qw = qobject_cast<QWidget *> (watched);
   if (!qw) return false;
   GtkQtEmitGuard guard;
+  struct Keep { GtkWidget *w; ~Keep () { g_object_unref (w); } } keep { (GtkWidget *) g_object_ref (w) };
   bool consumed = false;
   if (w->priv->controllers)
     gtkqt_controllers_dispatch (w, e, &consumed);
@@ -1143,15 +1162,19 @@ void gtk_widget_show (GtkWidget *widget)
 {
   g_return_if_fail (GTK_IS_WIDGET (widget));
   if (widget->priv->destroyed) return;
+  g_object_ref (widget);   /* event handlers run during the show may destroy it */
   if (!widget->priv->visible) {
     widget->priv->visible = true;
     widget->flags |= GTK_VISIBLE;
     gtkqt_sync_visible (widget);
-    g_signal_emit (widget, widget_signals[SIG_SHOW], 0);
-    g_object_notify (G_OBJECT (widget), "visible");
+    if (!widget->priv->destroyed) {
+      g_signal_emit (widget, widget_signals[SIG_SHOW], 0);
+      g_object_notify (G_OBJECT (widget), "visible");
+    }
   } else if (GTK_IS_WINDOW (widget)) {
     gtkqt_sync_visible (widget);
   }
+  g_object_unref (widget);
 }
 
 void gtk_widget_show_now (GtkWidget *widget) { gtk_widget_show (widget); }
@@ -1160,11 +1183,15 @@ void gtk_widget_hide (GtkWidget *widget)
 {
   g_return_if_fail (GTK_IS_WIDGET (widget));
   if (widget->priv->destroyed || !widget->priv->visible) return;
+  g_object_ref (widget);
   widget->priv->visible = false;
   widget->flags &= ~GTK_VISIBLE;
   gtkqt_sync_visible (widget);
-  g_signal_emit (widget, widget_signals[SIG_HIDE], 0);
-  g_object_notify (G_OBJECT (widget), "visible");
+  if (!widget->priv->destroyed) {
+    g_signal_emit (widget, widget_signals[SIG_HIDE], 0);
+    g_object_notify (G_OBJECT (widget), "visible");
+  }
+  g_object_unref (widget);
 }
 
 static void show_all_cb (GtkWidget *w, gpointer) { gtk_widget_show_all (w); }
@@ -1478,7 +1505,11 @@ void gtk_widget_add_events (GtkWidget *widget, gint events)
 }
 
 gint gtk_widget_get_events (GtkWidget *widget) { return widget->priv->events; }
-void gtk_widget_set_app_paintable (GtkWidget *, gboolean) {}
+void gtk_widget_set_app_paintable (GtkWidget *widget, gboolean app_paintable)
+{
+  g_object_set_data (G_OBJECT (widget), "gtkqt-app-paintable", GINT_TO_POINTER (app_paintable));
+  if (app_paintable) widget->flags |= GTK_APP_PAINTABLE; else widget->flags &= ~GTK_APP_PAINTABLE;
+}
 void gtk_widget_set_double_buffered (GtkWidget *, gboolean) {}
 void gtk_widget_set_has_window (GtkWidget *widget, gboolean has_window)
 {
@@ -1889,6 +1920,7 @@ void gtk_container_add (GtkContainer *container, GtkWidget *widget)
 void gtk_container_remove (GtkContainer *container, GtkWidget *widget)
 {
   g_return_if_fail (GTK_IS_CONTAINER (container));
+  g_return_if_fail (GTK_IS_WIDGET (widget));
   if (widget->parent != GTK_WIDGET (container)) return;
   g_object_ref (widget);
   g_signal_emit (container, container_signals[SIG_REMOVE], 0, widget);

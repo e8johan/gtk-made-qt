@@ -58,6 +58,21 @@ typedef enum {
   GDK_CONFIGURE = 13,
   GDK_MAP = 14,
   GDK_UNMAP = 15,
+  GDK_PROPERTY_NOTIFY = 16,
+  GDK_SELECTION_CLEAR = 17,
+  GDK_SELECTION_REQUEST = 18,
+  GDK_SELECTION_NOTIFY = 19,
+  GDK_PROXIMITY_IN = 20,
+  GDK_PROXIMITY_OUT = 21,
+  GDK_DRAG_ENTER = 22,
+  GDK_DRAG_LEAVE = 23,
+  GDK_DRAG_MOTION = 24,
+  GDK_DRAG_STATUS = 25,
+  GDK_DROP_START = 26,
+  GDK_DROP_FINISHED = 27,
+  GDK_CLIENT_EVENT = 28,
+  GDK_VISIBILITY_NOTIFY = 29,
+  GDK_NO_EXPOSE = 30,
   GDK_SCROLL = 31
 } GdkEventType;
 
@@ -208,6 +223,24 @@ typedef struct {
   gint width, height;
 } GdkEventConfigure;
 
+typedef struct {
+  GdkEventType type;
+  GdkWindow *window;
+  gint8 send_event;
+  struct _GdkAtom *message_type;
+  gushort data_format;
+  union { char b[20]; short s[10]; long l[5]; } data;
+} GdkEventClient;
+
+typedef struct {
+  GdkEventType type;
+  GdkWindow *window;
+  gint8 send_event;
+  struct _GdkAtom *selection, *target, *property;
+  guint32 requestor;
+  guint32 time;
+} GdkEventSelection;
+
 typedef union _GdkEvent {
   GdkEventType type;
   GdkEventAny any;
@@ -219,6 +252,8 @@ typedef union _GdkEvent {
   GdkEventCrossing crossing;
   GdkEventFocus focus_change;
   GdkEventConfigure configure;
+  GdkEventClient client;
+  GdkEventSelection selection;
 } GdkEvent;
 
 #define GDK_TYPE_EVENT (gdk_event_get_type ())
@@ -283,6 +318,9 @@ void        gdk_display_beep (GdkDisplay *display);
 void        gdk_threads_init (void);
 void        gdk_threads_enter (void);
 void        gdk_threads_leave (void);
+/* The GDK lock: GUI work happens on the main thread with Qt */
+#define GDK_THREADS_ENTER() gdk_threads_enter ()
+#define GDK_THREADS_LEAVE() gdk_threads_leave ()
 guint       gdk_threads_add_idle (GSourceFunc function, gpointer data);
 guint       gdk_threads_add_timeout (guint interval, GSourceFunc function, gpointer data);
 

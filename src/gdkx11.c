@@ -133,3 +133,30 @@ const gchar *gdk_x11_get_xatom_name (Atom xatom)
   g_free (n);
   return r;
 }
+
+/* GDK_IMAGE_XIMAGE: an XImage looking at the same pixels (32 bits per pixel) */
+XImage *gdk_x11_image_get_ximage (GdkImage *image)
+{
+  static GHashTable *views;
+  if (!image) return NULL;
+  if (!views) views = g_hash_table_new (g_direct_hash, g_direct_equal);
+  XImage *x = g_hash_table_lookup (views, image);
+  if (!x) {
+    x = g_new0 (XImage, 1);
+    g_hash_table_insert (views, image, x);
+  }
+  x->width = image->width;
+  x->height = image->height;
+  x->format = ZPixmap;
+  x->data = (char *) image->mem;
+  x->byte_order = LSBFirst;
+  x->bitmap_unit = 32;
+  x->bitmap_pad = 32;
+  x->depth = 24;
+  x->bits_per_pixel = 32;
+  x->bytes_per_line = image->bpl;
+  x->red_mask = 0xff0000;
+  x->green_mask = 0x00ff00;
+  x->blue_mask = 0x0000ff;
+  return x;
+}

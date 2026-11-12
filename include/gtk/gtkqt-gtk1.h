@@ -158,6 +158,30 @@ void     gtk_signal_handlers_destroy (GtkObject *object);
 
 /* GtkArg (GTK 1 object arguments): "GtkWidget::width" style names are
  * mapped onto GObject properties. */
+typedef struct _GtkArg {
+  GtkType type;
+  gchar *name;
+  union {
+    gchar char_data; guchar uchar_data; gboolean bool_data; gint int_data; guint uint_data; glong long_data;
+    gulong ulong_data; gfloat float_data; gdouble double_data; gchar *string_data; GtkObject *object_data;
+    gpointer pointer_data;
+    struct { GCallback f; gpointer d; } signal_data;
+  } d;
+} GtkArg;
+#define GTK_VALUE_CHAR(a)    ((a).d.char_data)
+#define GTK_VALUE_BOOL(a)    ((a).d.bool_data)
+#define GTK_VALUE_INT(a)     ((a).d.int_data)
+#define GTK_VALUE_UINT(a)    ((a).d.uint_data)
+#define GTK_VALUE_LONG(a)    ((a).d.long_data)
+#define GTK_VALUE_FLOAT(a)   ((a).d.float_data)
+#define GTK_VALUE_DOUBLE(a)  ((a).d.double_data)
+#define GTK_VALUE_STRING(a)  ((a).d.string_data)
+#define GTK_VALUE_POINTER(a) ((a).d.pointer_data)
+#define GTK_VALUE_OBJECT(a)  ((a).d.object_data)
+#define GTK_VALUE_ENUM(a)    ((a).d.int_data)
+#define GTK_VALUE_FLAGS(a)   ((a).d.uint_data)
+void gtk_object_arg_get (GtkObject *object, GtkArg *arg, gpointer info);
+void gtk_object_arg_set (GtkObject *object, GtkArg *arg, gpointer info);
 void gtk_widget_set (GtkWidget *widget, const gchar *first_property_name, ...);
 void gtk_object_set (GtkObject *object, const gchar *first_property_name, ...);
 void gtk_object_get (GtkObject *object, const gchar *first_property_name, ...);
@@ -239,7 +263,6 @@ GdkWindow *gdk_selection_owner_get (GdkAtom selection);
 void       gtk_selection_add_target (GtkWidget *widget, GdkAtom selection, GdkAtom target, guint info);
 gboolean   gtk_selection_owner_set (GtkWidget *widget, GdkAtom selection, guint32 time_);
 gboolean   gtk_selection_convert (GtkWidget *widget, GdkAtom selection, GdkAtom target, guint32 time_);
-typedef struct { GdkEventType type; GdkWindow *window; gint8 send_event; GdkAtom selection, target, property; guint32 requestor; guint32 time; } GdkEventSelection;
 #define GDK_SELECTION_TYPE_ATOM    _GDK_MAKE_ATOM (4)
 #define GDK_SELECTION_TYPE_INTEGER _GDK_MAKE_ATOM (19)
 #define GDK_TARGET_BITMAP          _GDK_MAKE_ATOM (5)
@@ -270,6 +293,7 @@ typedef struct {
 } GdkWindowAttr;
 GdkWindow *gdk_window_new (GdkWindow *parent, GdkWindowAttr *attributes, gint attributes_mask);
 void       gdk_window_destroy (GdkWindow *window);
+void       gdk_window_reparent (GdkWindow *window, GdkWindow *new_parent, gint x, gint y);
 #define    gdk_window_ref(w)   ((GdkWindow *) g_object_ref (w))
 #define    gdk_window_unref(w) g_object_unref (w)
 void       gdk_window_set_user_data (GdkWindow *window, gpointer user_data);
@@ -319,7 +343,8 @@ void       gdk_window_begin_move_drag (GdkWindow *window, gint button, gint root
 void       gdk_window_begin_resize_drag (GdkWindow *window, GdkWindowEdge edge, gint button, gint root_x, gint root_y, guint32 timestamp);
 void       gdk_window_remove_filter (GdkWindow *window, gpointer function, gpointer data);
 void       gdk_add_client_message_filter (GdkAtom message_type, gpointer func, gpointer data);
-void       gdk_property_change (GdkWindow *window, GdkAtom property, GdkAtom type, gint format, gint mode,
+typedef enum { GDK_PROP_MODE_REPLACE, GDK_PROP_MODE_PREPEND, GDK_PROP_MODE_APPEND } GdkPropMode;
+void       gdk_property_change (GdkWindow *window, GdkAtom property, GdkAtom type, gint format, GdkPropMode mode,
                                 const guchar *data, gint nelements);
 void       gdk_set_sm_client_id (const gchar *sm_client_id);
 void       gdk_error_trap_push (void);

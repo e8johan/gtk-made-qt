@@ -51,8 +51,20 @@ public:
 
   ~GtkQtDrawingWidget () override { if (surface) cairo_surface_destroy (surface); }
 
+  /* does the program draw on this widget? (otherwise a window with children
+   * paints like any other QWidget) */
+  bool program_draws (GtkWidget *w) const
+  {
+    if (GTK_IS_DRAWING_AREA (w) || !GTK_IS_WINDOW (w)) return true;
+    if (g_object_get_data (G_OBJECT (w), "gtkqt-app-paintable")) return true;
+    static guint expose_id = g_signal_lookup ("expose-event", GTK_TYPE_WIDGET);
+    static guint draw_id = g_signal_lookup ("draw", GTK_TYPE_WIDGET);
+    return g_signal_has_handler_pending (w, expose_id, 0, FALSE) || g_signal_has_handler_pending (w, draw_id, 0, FALSE);
+  }
+
   QSize sizeHint () const override
   {
+    if (layout ()) return QWidget::sizeHint ();
     GtkWidget *w = gtkqt_from_qobject (const_cast<GtkQtDrawingWidget *> (this));
     if (!w || !w->priv || w->priv->destroyed) return QSize (0, 0);
     if (GTK_IS_DRAWING_AREA (w)) {
@@ -69,6 +81,7 @@ public:
   }
   QSize minimumSizeHint () const override
   {
+    if (layout ()) return QWidget::minimumSizeHint ();
     GtkWidget *w = gtkqt_from_qobject (const_cast<GtkQtDrawingWidget *> (this));
     return w && !GTK_IS_DRAWING_AREA (w) ? sizeHint () : QSize (0, 0);
   }
@@ -122,6 +135,11 @@ protected:
   {
     GtkWidget *w = gtkqt_from_qobject (this);
     if (!w || w->priv->destroyed) return;
+    if (!program_draws (w) && backing.isNull ()) {
+      QPainter p (this);
+      p.fillRect (e->rect (), palette ().color (QPalette::Window));
+      return;
+    }
     ensure_backing ();
     if (!blit_only) {
       /* clear the exposed area to the window background, as X does */
@@ -129,11 +147,9 @@ protected:
         QPainter bp (&backing);
         GdkWindow *win = w->window;
         if (win && win->back_pixmap && win->back_pixmap->surface) {
-          cairo_surface_t *bs = win->back_pixmap->surface;
-          QImage bi (cairo_image_surface_get_data (bs), cairo_image_surface_get_width (bs), cairo_image_surface_get_height (bs),
-                     cairo_image_surface_get_stride (bs), QImage::Format_RGB32);
           bp.setClipRegion (e->region ());
-          bp.drawTiledPixmap (rect (), QPixmap::fromImage (bi));
+          bp.setCompositionMode (QPainter::CompositionMode_Source);
+          bp.drawTiledPixmap (rect (), QPixmap::fromImage (gtkqt_surface_image (win->back_pixmap->surface)));
         } else {
           bp.setCompositionMode (QPainter::CompositionMode_Source);
           for (const QRect &r : e->region ()) bp.fillRect (r, background ());
@@ -176,6 +192,7 @@ protected:
     cairo_surface_flush (surface);
     QPainter p (this);
     p.drawImage (0, 0, backing);
+   
   }
   void resizeEvent (QResizeEvent *e) override
   {
