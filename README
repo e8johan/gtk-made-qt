@@ -12,6 +12,14 @@ COPYING. The history of the two original projects is described in README.gqt.
     ./bgqt.sh gtk3/treeview
     ./bgqt.sh gtk4/application
 
+Real programs build unmodified with their own build systems, for example
+Leafpad (GTK 2 text editor): tools/build-leafpad.sh <source dir>. See
+docs/screenshots/leafpad-gtk2.png (real GTK 2) and leafpad-qt.png (this
+library). The finished program needs Qt, GLib, cairo and Pango - not GTK.
+
+Documentation: docs/user-guide.md (building programs), docs/packaging.md
+(install layout, PKGBUILDs), docs/architecture.md, docs/testing.md.
+
 
 How it works
 ------------
@@ -41,8 +49,15 @@ How it works
   in GTK 4; GTK 4 widgets are visible by default ...) the headers and runtime
   follow the generation the program was written for.
 
-Dependencies: Qt 6 (or 5.15) Widgets, GLib/GObject/GIO/GModule, cairo, CMake.
-GLib and cairo are plain C libraries, not GTK.
+* The library is static with hidden symbols: programs resolve the GTK API
+  when they are linked and export none of it, so nothing is looked up at run
+  time and a real GTK in the same process never meets these symbols.
+  lib/libgtk-x11-2.0.so, libgtk-3.so ... are linker scripts, so -lgtk-x11-2.0
+  works unchanged.
+
+Dependencies: Qt 6 (or 5.15) Widgets and PrintSupport, GLib/GObject/GIO/
+GModule, cairo, Pango, CMake. GLib, cairo and Pango are plain C libraries,
+not GTK.
 
 
 Building
@@ -54,19 +69,21 @@ Building
 
     cmake -S . -B build -DGTKQT_QT_MAJOR=5     # build against Qt 5.15 instead
 
-Using it with an existing GTK project: point pkg-config at the shim and build
-as usual.
+Using it with an existing GTK project: run the build under gtk-made-qt-env
+(build/gtk-made-qt-env in the build tree, /usr/bin/gtk-made-qt-env when
+installed), which points pkg-config and the linker at the library.
 
-    export PKG_CONFIG_PATH=/path/to/gtk-made-qt/build/pkgconfig
-    gcc myapp.c $(pkg-config --cflags --libs gtk+-3.0)
+    build/gtk-made-qt-env ./configure && build/gtk-made-qt-env make
+    eval "$(build/gtk-made-qt-env)"; gcc myapp.c $(pkg-config --cflags --libs gtk+-3.0)
 
-"cmake --install" installs the same files to <prefix>/lib/gtk-made-qt/pkgconfig.
+"cmake --install" installs to <prefix>/lib/gtk-made-qt (see docs/packaging.md).
 
 bgqt.sh builds and runs one example against the shim this way; bgtk.sh does
 the same with the real GTK, for side-by-side comparison.
 
 Debugging/test aid: GTKQT_AUTOQUIT=<ms> exits after that long and, with
 GTKQT_SCREENSHOT=<file.png>, first saves every visible window to a PNG.
+GTKQT_SCRIPT drives menus, keys and dialogs headless (docs/testing.md).
 
 
 What is implemented
@@ -90,8 +107,10 @@ Controls      GtkLabel (Pango markup subset, mnemonics, ellipsizing),
               GtkImage (theme icons, stock ids, files), GtkSpinner,
               GtkAdjustment (public GTK 2 fields), GtkScale, GtkScrollbar,
               GtkProgressBar, GtkLevelBar, GtkColorButton
-Text          GtkTextBuffer (a QTextDocument; several views per buffer),
-              GtkTextIter, GtkTextMark, GtkTextTag, GtkTextView
+Text          GtkTextBuffer (a QTextDocument; several views per buffer;
+              insert-text/delete-range/user-action signals as in GTK),
+              GtkTextIter, GtkTextMark, GtkTextTag, GtkTextView (GTK 2
+              fields, border windows for line numbers, coordinates, tabs)
 Lists/trees   GtkListStore, GtkTreeStore (GValue rows, sorting, sort
               functions), GtkTreePath, GtkTreeView, GtkTreeViewColumn,
               GtkTreeSelection, text/toggle/pixbuf/progress cell renderers
@@ -99,13 +118,16 @@ Lists/trees   GtkListStore, GtkTreeStore (GValue rows, sorting, sort
               GtkCellLayout combo boxes
 Menus         GtkMenuBar, GtkMenu, GtkMenuItem, check/radio/separator/image
               items, GtkOptionMenu (GTK 1/2), popup menus, GtkToolbar and tool
-              buttons, GtkAction/GtkActionGroup/GtkUIManager (GTK 2/3),
+              buttons, GtkItemFactory (GTK 1.2/2), GtkAction/GtkActionGroup/
+              GtkUIManager (GTK 2/3),
               GMenuModel menubars, GtkMenuButton, GtkPopover,
               GtkPopoverMenu(Bar)
 Dialogs       GtkDialog (+ gtk_dialog_run, GTK 2 vbox/action_area fields),
               GtkMessageDialog, GtkAboutDialog (+ gtk_show_about_dialog),
               GtkFileChooserDialog, GtkFileChooserNative, GtkFileFilter, and the
-              GTK 4.10 async GtkFileDialog / GtkAlertDialog
+              GTK 4.10 async GtkFileDialog / GtkAlertDialog,
+              GtkFileSelection, GtkFontSelectionDialog, printing
+              (GtkPrintOperation: print dialog, preview, PDF)
 Application   GtkApplication, GtkApplicationWindow (a GActionMap: "win."
               actions), set_accels_for_action, menubar from GMenuModel,
               gtk_widget_insert_action_group, actionable buttons
@@ -117,7 +139,12 @@ GtkBuilder    GTK 2.12+/3/4 XML: properties, enums/flags, packing and layout
               <menu>, action widgets, signals (connect_signals in GTK 2/3,
               automatic in GTK 4)
 GDK           events, key values (GDK_KEY_* and GTK 2 GDK_*), GdkRGBA/GdkColor
-              parsing, minimal GdkPixbuf, screen size
+              parsing, minimal GdkPixbuf, screen size, GdkGC drawing
+              (gdk_draw_*), pixmaps, atoms, colormaps, drag-and-drop
+              destinations, GtkClipboard
+GTK 2 misc    GtkStyle (from the Qt palette), Pango layouts for widgets,
+              gtk_widget_modify_*, gtk_paint_*, GtkSettings, stock items and
+              icon factories, GtkEditable insert-text/delete-text
 
 The test suite (tests/test-api.c) runs the same C tests at all three API
 levels; every example is also run as a smoke test.
@@ -130,12 +157,12 @@ What is missing (contributions welcome)
   ("suggested-action", "destructive-action", "title", "dim-label",
   "monospace", "error") get a rough Qt equivalent. Apps look like Qt apps.
 * GTK 4 list widgets (GtkListView, GtkColumnView, GtkGridView), GtkListBox,
-  GtkFlowBox, GtkSizeGroup, GtkCalendar, GtkFontChooser, printing,
-  drag-and-drop and the clipboard APIs.
-* Pango as an API (pango_layout_* for text in cairo drawing) and most of
-  GdkPixbuf.
-* GTK 2 GDK drawing primitives (gdk_draw_*, GdkGC). gdk_cairo_create works
-  inside expose handlers only.
+  GtkFlowBox, GtkSizeGroup, GtkCalendar, GtkFontChooser, drag sources, the
+  GTK 4 clipboard API.
+* Most of GdkPixbuf.
+* Drawing on a GdkWindow works inside its expose handler only (like X
+  without backing store); pixmaps keep their contents.
+* GTK 1.2 (in progress).
 * Text offsets are UTF-16 positions (only differs from GTK for characters
   outside the Basic Multilingual Plane).
 * Widget margins only apply to containers; stack transitions are ignored.
