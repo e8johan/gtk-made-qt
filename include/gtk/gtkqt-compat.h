@@ -42,12 +42,19 @@ typedef GtkWidget GtkNative;
 
 /* ---- GTK 1.x / 2.x spellings ---- */
 #if GTKQT_API_VERSION <= 2 && !defined (GTK_DISABLE_DEPRECATED)
+#if GTKQT_API_VERSION == 1
+typedef void (*GtkSignalFunc) ();   /* GTK 1: unprototyped, assignable to any handler type */
+#define GTK_SIGNAL_FUNC(f)                          ((GtkSignalFunc) (f))
+#else
 typedef GCallback GtkSignalFunc;
-typedef GSourceFunc GtkFunction;
 #define GTK_SIGNAL_FUNC(f)                          G_CALLBACK (f)
-#define gtk_signal_connect(o, name, f, d)           g_signal_connect ((o), (name), (f), (d))
-#define gtk_signal_connect_after(o, name, f, d)     g_signal_connect_after ((o), (name), (f), (d))
-#define gtk_signal_connect_object(o, name, f, slot) g_signal_connect_swapped ((o), (name), (f), (slot))
+#endif
+typedef GSourceFunc GtkFunction;
+/* GTK 1/2 code often passes handlers without GTK_SIGNAL_FUNC (); that
+ * compiled for decades, and GCC 14 / clang 16 would now reject it */
+#define gtk_signal_connect(o, name, f, d)           g_signal_connect ((o), (name), G_CALLBACK (f), (d))
+#define gtk_signal_connect_after(o, name, f, d)     g_signal_connect_after ((o), (name), G_CALLBACK (f), (d))
+#define gtk_signal_connect_object(o, name, f, slot) g_signal_connect_swapped ((o), (name), G_CALLBACK (f), (slot))
 #define gtk_signal_disconnect(o, id)                g_signal_handler_disconnect ((o), (id))
 #define gtk_signal_emit_by_name                     g_signal_emit_by_name
 #define gtk_signal_emit_stop_by_name(o, name)       g_signal_stop_emission_by_name ((o), (name))
@@ -59,9 +66,9 @@ typedef GSourceFunc GtkFunction;
 #define gtk_object_destroy(o)                       gtk_widget_destroy (GTK_WIDGET (o))
 #define gtk_widget_ref(w)                           g_object_ref (w)
 #define gtk_widget_unref(w)                         g_object_unref (w)
-#define gtk_timeout_add(ms, f, d)                   g_timeout_add ((ms), (f), (d))
+#define gtk_timeout_add(ms, f, d)                   g_timeout_add ((ms), (GSourceFunc) (f), (d))
 #define gtk_timeout_remove(id)                      g_source_remove (id)
-#define gtk_idle_add(f, d)                          g_idle_add ((f), (d))
+#define gtk_idle_add(f, d)                          g_idle_add ((GSourceFunc) (f), (d))
 #define gtk_idle_remove(id)                         g_source_remove (id)
 #define gtk_toggle_button_set_state                 gtk_toggle_button_set_active
 #define gtk_menu_item_right_justify(item)           gtk_menu_item_set_right_justified ((item), TRUE)

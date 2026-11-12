@@ -60,6 +60,15 @@ Things that cost time once; check here before debugging something similar.
 - An explicit window position (`gtk_widget_set_uposition`) wins over
   centering on the transient parent.
 - A GTK notebook asks for the width of all its tabs unless scrollable.
+- GTK 1.2's types were looser than GTK 2's, and old code relies on it:
+  `GtkSignalFunc` and `GtkItemFactoryCallback` were unprototyped
+  (`void (*)()`), `GdkAtom` was a `gulong` (the same as X's `Atom`) and
+  `GDK_NONE` was `0L`, also passed as "no window". Declared the GTK 2 way,
+  GCC 14 and clang 16 reject XMMS by the hundred (incompatible pointer
+  types, int conversion). At API level 1 the headers use GTK 1's types;
+  the GTK 1/2 connect, timeout and idle macros cast their callbacks.
+- C23 (GCC 15's default) has no unprototyped functions and makes `bool` a
+  keyword: build GTK 1 era programs with `-std=gnu17`.
 
 ## Xlib
 

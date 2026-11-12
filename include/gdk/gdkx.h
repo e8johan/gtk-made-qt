@@ -60,6 +60,7 @@ void       gdk_x11_ungrab_server (void);
 #define GDK_SCREEN_XSCREEN(s)       (gdk_x11_screen_get_xscreen (s))
 #define GDK_DISPLAY_XDISPLAY(d)     (gdk_x11_get_default_xdisplay ())
 #define GDK_FONT_XDISPLAY(font)     (gdk_x11_get_default_xdisplay ())
+struct _GdkImage;
 XImage    *gdk_x11_image_get_ximage (struct _GdkImage *image);
 #define GDK_IMAGE_XIMAGE(image)     (gdk_x11_image_get_ximage (image))
 #define GDK_IMAGE_XDISPLAY(image)   (gdk_x11_get_default_xdisplay ())

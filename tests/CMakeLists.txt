@@ -12,6 +12,12 @@ set_tests_properties(gtk2 PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # GTK 1.2 API (type system, custom widgets, CList, XPM, fonts)
 gtkqt_add_program(test-gtk1 ${CMAKE_CURRENT_SOURCE_DIR}/test-gtk1.c 1)
+# GTK 1 code must compile with the errors GCC 14 and clang 16 turned on
+# (the C mode stays gnu17: C23 has no unprototyped functions, which GTK 1 used)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test-gtk1 PRIVATE -std=gnu17 -Werror=incompatible-pointer-types -Werror=int-conversion
+        -Werror=implicit-function-declaration -Werror=implicit-int)
+endif()
 add_test(NAME gtk1 COMMAND test-gtk1)
 set_tests_properties(gtk1 PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 

@@ -102,6 +102,15 @@ static void on_item_activate (GtkWidget *w, gpointer d) { (void) w; (void) d; it
 /* GTK 1.2's menu position function has no push_in argument */
 static gpointer pos_data;
 static void menu_pos (GtkMenu *m, gint *x, gint *y, gpointer data) { (void) m; *x = 5; *y = 5; pos_data = data; }
+/* GTK 1 programs connect handlers without GTK_SIGNAL_FUNC, store them in
+   typed fields and in item factory tables, and mix X and GDK atoms */
+static void bare_handler (GtkWidget *w, GdkEventButton *ev, gpointer d) { (void) w; (void) ev; (void) d; }
+static void typed_menu_cb (gpointer data, guint action, GtkWidget *w) { (void) data; (void) action; (void) w; }
+static GtkItemFactoryEntry gtk1_entries[] = {
+  { "/_File", NULL, NULL, 0, "<Branch>" },
+  { "/File/_Quit", "<control>Q", typed_menu_cb, 1, NULL },
+};
+struct gtk1_widget_struct { void (*press_cb) (GtkWidget *, GdkEventButton *, gpointer); };
 static void pump (void) { for (int i = 0; i < 10; i++) { while (gtk_events_pending ()) gtk_main_iteration (); g_usleep (5000); } }
 
 static const char *xpm[] = { "4 2 2 1", ". c #ff0000", "  c None", ".. .", " .. " };
@@ -168,6 +177,24 @@ int main (int argc, char **argv)
   CHECK (realized == 1);
   CHECK (exposed > 0 && drew_text);
   CHECK (blob->allocation.width >= 60 && blob->allocation.height >= 40);
+  /* GTK 1 type rules (compile-time: see the -Werror flags in CMakeLists) */
+  {
+    GtkWidget *b = gtk_button_new ();
+    gtk_signal_connect (GTK_OBJECT (b), "button_press_event", bare_handler, NULL);
+    struct gtk1_widget_struct s1;
+    s1.press_cb = GTK_SIGNAL_FUNC (bare_handler);
+    (void) s1;
+    gulong xatom = gdk_atom_intern ("_WIN_LAYER", FALSE);   /* an X Atom in GTK 1 */
+    CHECK (xatom != GDK_NONE && gdk_atom_intern ("_WIN_LAYER", TRUE) == xatom);
+    GdkWindow *no_window = GDK_NONE;   /* gdk_pointer_grab (w, FALSE, mask, GDK_NONE, GDK_NONE, t) */
+    CHECK (no_window == NULL);
+    gdk_pointer_ungrab (GDK_CURRENT_TIME);
+    GtkItemFactory *f = gtk_item_factory_new (GTK_TYPE_MENU_BAR, "<gtk1>", NULL);
+    gtk_item_factory_create_items (f, 2, gtk1_entries, NULL);
+    CHECK (gtk_item_factory_get_widget (f, "/File/Quit") != NULL);
+    gtk_widget_destroy (b);
+  }
+
   /* a labelled button has a GtkLabel child, as in GTK: programs relabel it */
   gchar *str = NULL;
   GtkWidget *button = gtk_button_new_with_label ("Cancel");
