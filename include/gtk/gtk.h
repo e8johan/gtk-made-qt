@@ -21,6 +21,10 @@
 #include <gmodule.h>
 #include <gdk/gdk.h>
 
+#if !defined (GTKQT_COMPILATION) || defined (GTKQT_EXPORT_API)
+#pragma GCC visibility push(default)
+#define GTKQT_VISIBILITY_PUSHED_GTK
+#endif
 #include <gtk/gtkqt-enums.h>
 #include <gtk/gtkqt-widget.h>
 #include <gtk/gtkqt-containers.h>
@@ -35,5 +39,8 @@
 #include <gtk/gtkqt-print.h>
 #include <gtk/gtkqt-gtk1.h>
 #include <gtk/gtkqt-compat.h>
+#ifdef GTKQT_VISIBILITY_PUSHED_GTK
+#pragma GCC visibility pop
+#endif
 
 #endif

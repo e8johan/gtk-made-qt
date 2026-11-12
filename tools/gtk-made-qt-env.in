@@ -6,7 +6,12 @@
 #
 # pkg-config gtk+-2.0 / gtk+-3.0 / gtk4 (and -lgtk-x11-2.0 ...) then resolve
 # to GTK made Qt, linked statically.
+#
+#   gtk-made-qt-env --shared ...   link the shared library instead: for
+#                                  programs whose plugins or own shared
+#                                  libraries call GTK too (e.g. XMMS)
 libdir="@GTKQT_ENV_LIBDIR@"
+if [ "$1" = "--shared" ]; then libdir="$libdir/shared"; shift; fi
 pcpath="$libdir/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 ldflags="-L$libdir${LDFLAGS:+ $LDFLAGS}"
 path="$libdir/bin:$PATH"

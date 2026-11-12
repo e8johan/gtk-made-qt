@@ -46,22 +46,39 @@ add_custom_command(OUTPUT ${GTKQT_GENERATED}/types.inc
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_type_table.py ${GTKQT_SOURCES}
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
-# The library is static: programs resolve the GTK API when they are linked,
-# nothing is looked up at run time, and nothing is exported from the
-# finished program (hidden visibility), so a real GTK that something else
-# loads into the process never meets these symbols. Qt, GLib/GObject/GIO
-# and Cairo stay shared libraries.
-add_library(gtk-made-qt STATIC ${GTKQT_SOURCES} ${GTKQT_GENERATED}/types.inc)
-target_compile_definitions(gtk-made-qt PRIVATE GTKQT_COMPILATION QT_NO_KEYWORDS)
+# The library is static: programs resolve the GTK API when they are linked
+# and nothing is looked up at run time. Internals have hidden visibility;
+# the API keeps default visibility (see gdk.h), which ordinary executables
+# do not export. Qt, GLib/GObject/GIO, cairo and Pango stay shared.
+#
+# Programs with plugins (a shared library or dlopen'ed modules that call
+# GTK themselves, e.g. XMMS) need one copy of the toolkit for all of them:
+# GTKQT_BUILD_SHARED also builds libgtk-made-qt.so, used through
+# "gtk-made-qt-env --shared".
+option(GTKQT_BUILD_SHARED "Also build the shared library for programs with plugins" ON)
+function(gtkqt_objects name)
+    add_library(${name} OBJECT ${GTKQT_SOURCES} ${GTKQT_GENERATED}/types.inc)
+    target_compile_definitions(${name} PRIVATE GTKQT_COMPILATION QT_NO_KEYWORDS ${ARGN})
+    target_include_directories(${name} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> PRIVATE ${GTKQT_GENERATED})
+    target_link_libraries(${name} PUBLIC PkgConfig::GLIB PkgConfig::CAIRO Qt::Widgets Qt::PrintSupport)
+    set_target_properties(${name} PROPERTIES POSITION_INDEPENDENT_CODE ON
+        C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+endfunction()
+gtkqt_objects(gtkqt_objects)
+add_library(gtk-made-qt STATIC $<TARGET_OBJECTS:gtkqt_objects>)
 target_include_directories(gtk-made-qt PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/gtk-made-qt>
-    PRIVATE ${GTKQT_GENERATED})
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/gtk-made-qt>)
 target_link_libraries(gtk-made-qt PUBLIC PkgConfig::GLIB PkgConfig::CAIRO Qt::Widgets Qt::PrintSupport)
-set_target_properties(gtk-made-qt PROPERTIES
-    POSITION_INDEPENDENT_CODE ON
-    C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON
-    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
+set_target_properties(gtk-made-qt PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
+if(GTKQT_BUILD_SHARED)
+    gtkqt_objects(gtkqt_objects_shared GTKQT_EXPORT_API)
+    add_library(gtk-made-qt-shared SHARED $<TARGET_OBJECTS:gtkqt_objects_shared>)
+    target_include_directories(gtk-made-qt-shared PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
+    target_link_libraries(gtk-made-qt-shared PUBLIC PkgConfig::GLIB PkgConfig::CAIRO Qt::Widgets Qt::PrintSupport)
+    set_target_properties(gtk-made-qt-shared PROPERTIES OUTPUT_NAME gtk-made-qt VERSION ${PROJECT_VERSION} SOVERSION 0
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
+endif()
 
 # Drop-in names: lib/libgtk-x11-2.0.so, libgtk-3.so ... are GNU ld scripts
 # pulling in the archive and Qt, so -lgtk-x11-2.0 works unchanged; the
@@ -112,6 +129,36 @@ foreach(pc ${GTKQT_PC_FILES})
     file(CREATE_LINK ${CMAKE_CURRENT_BINARY_DIR}/lib/pkgconfig/${PCNAME}.pc ${CMAKE_CURRENT_BINARY_DIR}/pkgconfig/${PCNAME}.pc SYMBOLIC)
 endforeach()
 
+# Shared variant (gtk-made-qt-env --shared): <libdir>/gtk-made-qt/shared has
+# the same pkg-config files and gtk-config, and lib<name>.so links to the
+# shared library, which itself lives in the normal library directory.
+if(GTKQT_BUILD_SHARED)
+    foreach(pc ${GTKQT_PC_FILES})
+        string(REPLACE "|" ";" f "${pc}")
+        list(GET f 0 PCNAME)
+        list(GET f 1 GTKQT_API)
+        list(GET f 2 GTK_FAKE_VERSION)
+        list(GET f 3 PC_LIBNAME)
+        set(PC_INCLUDEDIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
+        set(PC_LIBDIR ${CMAKE_CURRENT_BINARY_DIR}/lib/shared)
+        configure_file(pkgconfig/gtk.pc.in ${CMAKE_CURRENT_BINARY_DIR}/lib/shared/pkgconfig/${PCNAME}.pc @ONLY)
+        set(PC_INCLUDEDIR ${GTKQT_INSTALL_INCLUDEDIR})
+        set(PC_LIBDIR ${GTKQT_INSTALL_LIBDIR}/shared)
+        configure_file(pkgconfig/gtk.pc.in ${GTKQT_STAGE}/shared/pkgconfig/${PCNAME}.pc @ONLY)
+    endforeach()
+    foreach(n ${GTKQT_LINK_NAMES})
+        file(CREATE_LINK ../libgtk-made-qt.so ${CMAKE_CURRENT_BINARY_DIR}/lib/shared/lib${n}.so SYMBOLIC)
+        file(CREATE_LINK ${CMAKE_INSTALL_FULL_LIBDIR}/libgtk-made-qt.so.0 ${GTKQT_STAGE}/shared/lib${n}.so SYMBOLIC)
+    endforeach()
+    foreach(script gtk-config glib-config)
+        set(GTKQT_CONFIG_PCDIR ${CMAKE_CURRENT_BINARY_DIR}/lib/shared/pkgconfig)
+        configure_file(tools/${script}.in ${CMAKE_CURRENT_BINARY_DIR}/lib/shared/bin/${script} @ONLY
+            FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+        set(GTKQT_CONFIG_PCDIR ${GTKQT_INSTALL_LIBDIR}/shared/pkgconfig)
+        configure_file(tools/${script}.in ${GTKQT_STAGE}/shared/bin/${script} @ONLY)
+    endforeach()
+endif()
+
 # GTK 1.2 programs ask gtk-config / glib-config instead of pkg-config
 foreach(script gtk-config glib-config)
     set(GTKQT_CONFIG_PCDIR ${CMAKE_CURRENT_BINARY_DIR}/lib/pkgconfig)
@@ -139,6 +186,11 @@ Libs: -L\${libdir}
 ")
 
 install(TARGETS gtk-made-qt ARCHIVE DESTINATION ${GTKQT_INSTALL_LIBDIR})
+if(GTKQT_BUILD_SHARED)
+    install(TARGETS gtk-made-qt-shared LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_SKIP)
+    install(DIRECTORY ${GTKQT_STAGE}/shared/ DESTINATION ${GTKQT_INSTALL_LIBDIR}/shared
+            PATTERN "bin/*" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+endif()
 foreach(n ${GTKQT_LINK_NAMES})
     install(FILES ${GTKQT_STAGE}/lib${n}.so DESTINATION ${GTKQT_INSTALL_LIBDIR})
 endforeach()

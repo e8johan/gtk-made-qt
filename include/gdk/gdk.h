@@ -18,6 +18,12 @@
 #include <pango/pangocairo.h>
 #include <gdk/gdkkeysyms.h>
 
+/* The shared build exports the API; the static one keeps it hidden, so a
+ * program never exports GTK symbols (even when linked with -rdynamic). */
+#if !defined (GTKQT_COMPILATION) || defined (GTKQT_EXPORT_API)
+#pragma GCC visibility push(default)
+#define GTKQT_VISIBILITY_PUSHED_GDK
+#endif
 G_BEGIN_DECLS
 
 typedef struct _GdkWindow GdkWindow;   /* opaque; one per widget */
@@ -479,5 +485,8 @@ GdkDragAction gdk_drag_context_get_suggested_action (GdkDragContext *context);
 GdkDragAction gdk_drag_context_get_selected_action (GdkDragContext *context);
 
 G_END_DECLS
+#ifdef GTKQT_VISIBILITY_PUSHED_GDK
+#pragma GCC visibility pop
+#endif
 
 #endif /* GTKQT_GDK_H */
