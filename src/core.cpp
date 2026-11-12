@@ -179,6 +179,24 @@ static void setup_app ()
                "g_timeout_add() and friends will not run");
 }
 
+/* Qt's gtk2/gtk3 platform-theme plugins load the real GTK into the process,
+ * whose GObject types (GtkWidget ...) would collide with ours. Use Qt's own
+ * GNOME theme instead where Qt would pick them: when asked for explicitly, or
+ * by default on GNOME-family desktops. */
+static void avoid_real_gtk_theme ()
+{
+  QByteArray theme = qgetenv ("QT_QPA_PLATFORMTHEME").toLower ();
+  QByteArray desktop = qgetenv ("XDG_CURRENT_DESKTOP").toLower ();
+  bool gtk_desktop = false;
+  for (const char *d : { "gnome", "unity", "xfce", "mate", "cinnamon", "budgie", "pantheon", "lxde" })
+    if (desktop.contains (d)) gtk_desktop = true;
+  if (theme.contains ("gtk") || (theme.isEmpty () && gtk_desktop)) {
+    if (theme.contains ("gtk"))
+      g_message ("gtk-made-qt: Qt's %s platform theme would load the real GTK; using Qt's gnome theme", theme.constData ());
+    qputenv ("QT_QPA_PLATFORMTHEME", "gnome");
+  }
+}
+
 void gtkqt_ensure_app (void)
 {
   if (QCoreApplication::instance ()) {
@@ -187,6 +205,7 @@ void gtkqt_ensure_app (void)
   }
   static int argc = 1;
   static char *argv[] = { g_strdup (g_get_prgname () ? g_get_prgname () : "gtk-made-qt"), nullptr };
+  avoid_real_gtk_theme ();
   new QApplication (argc, argv);
   s_initialized = true;
   setup_app ();
@@ -204,6 +223,7 @@ gboolean gtkqt_init_check (int *argc, char ***argv, int api_version)
     g_free (base);
   }
   if (!QCoreApplication::instance ()) {
+    avoid_real_gtk_theme ();
     if (argc && argv && *argv)
       new QApplication (*argc, *argv);
     else

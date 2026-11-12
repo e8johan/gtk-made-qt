@@ -40,6 +40,8 @@ struct _GtkTextBufferClass {
 #define GTK_TYPE_TEXT_ITER    (gtk_text_iter_get_type ())
 GType          gtk_text_buffer_get_type (void) G_GNUC_CONST;
 GType          gtk_text_tag_get_type (void) G_GNUC_CONST;
+GType          gtk_text_mark_get_type (void) G_GNUC_CONST;
+#define GTK_TYPE_TEXT_MARK    (gtk_text_mark_get_type ())
 GType          gtk_text_iter_get_type (void) G_GNUC_CONST;
 
 GtkTextBuffer *gtk_text_buffer_new (GtkTextTagTable *table);

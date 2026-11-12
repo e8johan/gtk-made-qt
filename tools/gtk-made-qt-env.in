@@ -1,0 +1,19 @@
+#!/bin/sh
+# Build GTK programs against GTK made Qt.
+#
+#   eval "$(gtk-made-qt-env)"      set PKG_CONFIG_PATH, LDFLAGS and PATH
+#   gtk-made-qt-env make ...       run one command with them set
+#
+# pkg-config gtk+-2.0 / gtk+-3.0 / gtk4 (and -lgtk-x11-2.0 ...) then resolve
+# to GTK made Qt, linked statically.
+libdir="@GTKQT_ENV_LIBDIR@"
+pcpath="$libdir/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+ldflags="-L$libdir${LDFLAGS:+ $LDFLAGS}"
+path="$libdir/bin:$PATH"
+if [ $# -eq 0 ]; then
+  printf 'export PKG_CONFIG_PATH="%s"\n' "$pcpath"
+  printf 'export LDFLAGS="%s"\n' "$ldflags"
+  printf 'export PATH="%s"\n' "$path"
+  exit 0
+fi
+PKG_CONFIG_PATH="$pcpath" LDFLAGS="$ldflags" PATH="$path" exec "$@"

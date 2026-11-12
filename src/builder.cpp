@@ -79,6 +79,11 @@ static void gtk_builder_class_init (GtkBuilderClass *klass) { G_OBJECT_CLASS (kl
 
 extern "C" GQuark gtk_builder_error_quark (void) { return g_quark_from_static_string ("gtk-builder-error-quark"); }
 
+/* the library's GType functions (some are declared only for one API level) */
+#define TYPE_FN(f) extern "C" GType f (void);
+#include "types.inc"
+#undef TYPE_FN
+
 static GType resolve_type (const QString &name)
 {
   QByteArray n = name.toUtf8 ();
@@ -94,6 +99,16 @@ static GType resolve_type (const QString &name)
     sym += g_ascii_tolower (c);
   }
   sym += "_get_type";
+  /* our own types: from the table (the library's symbols are not exported) */
+  static const QHash<QByteArray, GType (*) (void)> own = [] {
+    QHash<QByteArray, GType (*) (void)> h;
+#define TYPE_FN(f) h.insert (#f, &f);
+#include "types.inc"
+#undef TYPE_FN
+    return h;
+  } ();
+  if (auto *f = own.value (sym)) return f ();
+  /* the program's own types */
   static GModule *self = g_module_open (nullptr, (GModuleFlags) 0);
   gpointer fn = nullptr;
   if (self && g_module_symbol (self, sym.constData (), &fn) && fn) return ((GType (*) (void)) fn) ();
@@ -448,7 +463,21 @@ static GObject *build_object (GtkBuilder *b, Node *n, GObject *existing, GError 
 static void connect_one (GtkBuilder *b, const SignalInfo &s, GModule *module, gpointer user_data)
 {
   gpointer fn = nullptr;
-  if (!module || !g_module_symbol (module, s.handler.constData (), &fn) || !fn) {
+  /* GTK's own functions named as handlers in .ui files */
+  static const QHash<QByteArray, gpointer> gtk_handlers = {
+    { "gtk_main_quit", (gpointer) gtk_main_quit },
+    { "gtk_widget_destroy", (gpointer) gtk_widget_destroy },
+    { "gtk_widget_hide", (gpointer) gtk_widget_hide },
+    { "gtk_widget_show", (gpointer) gtk_widget_show },
+    { "gtk_widget_show_all", (gpointer) gtk_widget_show_all },
+    { "gtk_widget_hide_on_delete", (gpointer) gtk_widget_hide_on_delete },
+    { "gtk_widget_grab_focus", (gpointer) gtk_widget_grab_focus },
+    { "gtk_window_close", (gpointer) gtk_window_close },
+    { "gtk_window_present", (gpointer) gtk_window_present },
+  };
+  if (module && g_module_symbol (module, s.handler.constData (), &fn) && fn) { /* the program's handler */ }
+  else fn = gtk_handlers.value (s.handler);
+  if (!fn) {
     g_warning ("Could not find signal handler '%s'. Did you compile with -rdynamic?", s.handler.constData ());
     return;
   }
