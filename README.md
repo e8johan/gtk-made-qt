@@ -28,6 +28,30 @@ classes written the GTK 1 way (`gtk_type_unique`, `realize` and
 
 ![GTK 1.2 tutorial programs](docs/screenshots/gtk1-tutorial.png)
 
+[XMMS 1.2.11](https://github.com/deepfire/xmms), the GTK 1.2 audio player
+from 2007, built from its unmodified source with its own autotools build
+(`gtk-made-qt-env --shared ./configure && make`), here on X11 through Qt's
+xcb platform. The skins are XPM data drawn with GdkGC into pixmaps that
+become window backgrounds; the windows are shaped and frameless; the
+buttons are XMMS's own, driven by GDK button events. The binary and all 17
+plugins (ALSA, Ogg Vorbis, MP3, visualizations ...) need no GTK and no
+libX11: `wmxmms`, its dock applet, calls Xlib directly and gets GTK made
+Qt's Xlib layer.
+
+| XMMS on Qt | Right-click menu (GtkItemFactory) |
+| --- | --- |
+| ![XMMS main window, equalizer and playlist](docs/screenshots/xmms-qt.png) | ![XMMS menu](docs/screenshots/xmms-menu.png) |
+
+Its dialogs are GTK 1.2 code too: Preferences with GtkCList and
+GtkOptionMenu, the ALSA plugin's configuration (a GtkCombo the plugin fills
+itself), and the file browser - XMMS reaches into GtkFileSelection's
+`file_list`, relabels its buttons and adds its own, so at the GTK 1 level
+GtkFileSelection is built from GTK widgets as in GTK 1.2:
+
+![XMMS preferences and ALSA settings](docs/screenshots/xmms-preferences.png)
+
+![XMMS file browser](docs/screenshots/xmms-filebrowser.png)
+
 ## Quick start
 
 ```bash
@@ -81,7 +105,7 @@ not on GTK made Qt (the library is static). See
 - Static library with hidden internals; `libgtk-x11-2.0.so`, `libgtk.so` ...
   are linker scripts so `-lgtk-x11-2.0` works unchanged. Programs with
   plugins that call GTK themselves (XMMS) use the shared variant
-  (`gtk-made-qt-env --shared`).
+  (`gtk-made-qt-env --shared`), `libgtk-made-qt.so.0`.
 
 Dependencies: Qt 6 (or 5.15) Widgets and PrintSupport, GLib/GObject/GIO,
 cairo, Pango, CMake. GLib, cairo and Pango are plain C libraries, not GTK.
@@ -105,7 +129,8 @@ cairo, Pango, CMake. GLib, cairo and Pango are plain C libraries, not GTK.
 | Other | GtkBuilder, GtkSettings, stock items and icon factories, GtkClipboard, drag-and-drop destinations |
 
 Tests: `tests/` (run at all API levels) and every example, headless, via
-ctest. Real programs: Leafpad (GTK 2) and the GTK 1.2 tutorial programs;
+ctest. Real programs: Leafpad (GTK 2), XMMS 1.2.11 and the GTK 1.2
+tutorial programs;
 [docs/testing.md](docs/testing.md) explains the comparisons with real GTK.
 
 Layout follows GTK's rules closely enough that windows come out at much the
