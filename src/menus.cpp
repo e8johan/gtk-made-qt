@@ -314,7 +314,10 @@ void gtk_menu_popup (GtkMenu *menu, GtkWidget *, GtkWidget *, GtkMenuPositionFun
   if (func) {
     gint x = pos.x (), y = pos.y ();
     gboolean push_in = FALSE;
-    func (menu, &x, &y, &push_in, data);
+    if (gtkqt_api == 1)   /* GTK 1.2's position function has no push_in */
+      reinterpret_cast<void (*) (GtkMenu *, gint *, gint *, gpointer)> (func) (menu, &x, &y, data);
+    else
+      reinterpret_cast<void (*) (GtkMenu *, gint *, gint *, gboolean *, gpointer)> (func) (menu, &x, &y, &push_in, data);
     pos = QPoint (x, y);
   }
   m->popup (pos);
@@ -564,9 +567,14 @@ GtkWidget *gtk_check_menu_item_new_with_mnemonic (const gchar *label)
   return w;
 }
 
+/* as GTK: a change activates the item, so "activate" handlers (item factory
+   callbacks) run too, after the state has changed */
 void gtk_check_menu_item_set_active (GtkCheckMenuItem *item, gboolean is_active)
 {
-  if (auto *a = gtkqt_q<QAction> (GTK_WIDGET (item))) a->setChecked (is_active);
+  auto *a = gtkqt_q<QAction> (GTK_WIDGET (item));
+  if (!a || a->isChecked () == !!is_active) return;
+  a->setChecked (is_active);
+  g_signal_emit_by_name (item, "activate");
 }
 
 gboolean gtk_check_menu_item_get_active (GtkCheckMenuItem *item)
@@ -678,6 +686,25 @@ static void gtk_option_menu_class_init (GtkOptionMenuClass *klass)
   g_signal_new ("changed", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
 }
 
+/* GTK shows the chosen item's label inside the option menu, so programs read
+ * GTK_BIN (option_menu)->child as a GtkLabel; that label is the button text */
+static void option_menu_show (GtkWidget *om, const QString &action_text)
+{
+  QString plain = action_text;
+  plain.remove (QRegularExpression (QStringLiteral ("&(?!&)"))).replace (QStringLiteral ("&&"), QStringLiteral ("&"));
+  QByteArray t = plain.toUtf8 ();
+  GtkWidget *child = GTK_BIN (om)->child;
+  if (!child) {
+    child = gtk_label_new (t.constData ());
+    gtk_container_add (GTK_CONTAINER (om), child);
+    gtk_widget_show (child);
+  } else if (GTK_IS_LABEL (child)) {
+    gtk_label_set_text (GTK_LABEL (child), t.constData ());
+  } else if (auto *b = gtkqt_q<QPushButton> (om)) {
+    b->setText (action_text);
+  }
+}
+
 extern "C" {
 GtkWidget *gtk_option_menu_new (void) { return (GtkWidget *) g_object_new (GTK_TYPE_OPTION_MENU, nullptr); }
 
@@ -692,8 +719,9 @@ void gtk_option_menu_set_menu (GtkOptionMenu *option_menu, GtkWidget *menu)
     g_object_unref (p);
   });
   b->setMenu (m);
-  auto update = [b, m] (QAction *chosen) {
-    if (chosen) b->setText (chosen->text ());
+  GtkWidget *om = GTK_WIDGET (option_menu);
+  auto update = [om, b, m] (QAction *chosen) {
+    if (chosen) option_menu_show (om, chosen->text ());
     b->setProperty ("_gtkqt_history", m->actions ().indexOf (chosen));
   };
   QList<QAction *> acts = m->actions ();
@@ -710,7 +738,7 @@ void gtk_option_menu_set_history (GtkOptionMenu *option_menu, guint index_)
 {
   auto *b = gtkqt_q<QPushButton> (GTK_WIDGET (option_menu));
   if (b && b->menu () && (int) index_ < b->menu ()->actions ().size ()) {
-    b->setText (b->menu ()->actions ().at (index_)->text ());
+    option_menu_show (GTK_WIDGET (option_menu), b->menu ()->actions ().at (index_)->text ());
     b->setProperty ("_gtkqt_history", (int) index_);
   }
 }

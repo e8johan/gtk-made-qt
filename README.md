@@ -101,6 +101,7 @@ cairo, Pango, CMake. GLib, cairo and Pango are plain C libraries, not GTK.
 | Printing | GtkPrintOperation: print dialog, preview, PDF export |
 | Application | GtkApplication, GtkApplicationWindow, actions and accelerators |
 | Drawing | GtkDrawingArea (expose-event, draw, GTK 4 draw functions), GdkGC drawing, GdkPixmap, XPM, GdkImage, GdkRGB, GdkFont, GtkStyle, Pango, GTK 4 event controllers |
+| Xlib | X11 headers and `-lX11` for programs that call Xlib next to GDK: X ids of GDK windows (`GDK_WINDOW_XWINDOW`), properties and atoms, window-manager requests (`_NET_WM_STATE`, `_NET_WM_MOVERESIZE`, `_MOTIF_WM_HINTS` ...), GCs and drawing, fonts, images, SHAPE |
 | Other | GtkBuilder, GtkSettings, stock items and icon factories, GtkClipboard, drag-and-drop destinations |
 
 Tests: `tests/` (run at all API levels) and every example, headless, via
@@ -122,7 +123,6 @@ same size:
   GtkFlowBox, GtkSizeGroup, GtkFontChooser, drag sources, the GTK 4
   clipboard API, the GTK 1 GtkTree widget.
 - Most of GdkPixbuf.
-- Programs that call Xlib directly next to GDK.
 - Text offsets are UTF-16 positions (only differs from GTK for characters
   outside the Basic Multilingual Plane).
 

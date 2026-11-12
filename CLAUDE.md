@@ -27,6 +27,9 @@ File/Open...; file /tmp/x.txt; shot a.png; quit"` (see docs/testing.md).
 - `src/gtk1.cpp` GTK 1.2 type/signal/arg layer, GDK 1 (fonts, cursors, XPM,
   images, RGB, windows); `src/gtk1widgets.cpp` GtkCList/CTree, GtkList,
   GtkText, GtkPacker, GtkRuler, GtkCalendar ...
+- `src/gdkx11.c` gdk/gdkx.h (X ids, fake Display, atoms); `src/x11/xlib.c`
+  Xlib on the public GDK API, built as libgtkqt-x11.a (`-lX11`); X11 headers
+  in `include/X11` come from the Motif on Qt project
 - `src/print.cpp` GtkPrintOperation on QPrinter; `src/script.cpp` GTKQT_SCRIPT
 - `examples/gtk2|3|4` programs built unmodified; `tests/` regression tests
 

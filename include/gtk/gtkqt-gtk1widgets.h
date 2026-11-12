@@ -36,7 +36,18 @@ typedef enum { GTK_BUTTON_IGNORED = 0, GTK_BUTTON_SELECTS = 1 << 0, GTK_BUTTON_D
 typedef struct _GtkCList GtkCList;
 typedef gint (*GtkCListCompareFunc) (GtkCList *clist, gconstpointer ptr1, gconstpointer ptr2);
 typedef struct { gchar *title; GdkRectangle area; GtkWidget *button; gint width; GtkJustification justification; gboolean visible; } GtkCListColumn;
-typedef struct _GtkCListRow { gpointer cell; GtkStateType state; GdkColor foreground, background; GtkStyle *style;
+/* GTK 1's cell structures: row->cell[column] */
+typedef struct { GtkCellType type; gint16 vertical, horizontal; GtkStyle *style;
+                 union { gchar *text; struct { GdkPixmap *pixmap; GdkBitmap *mask; } pm;
+                         struct { gchar *text; guint8 spacing; GdkPixmap *pixmap; GdkBitmap *mask; } pt; GtkWidget *widget; } u; } GtkCell;
+typedef struct { GtkCellType type; gint16 vertical, horizontal; GtkStyle *style; gchar *text; } GtkCellText;
+typedef struct { GtkCellType type; gint16 vertical, horizontal; GtkStyle *style; GdkPixmap *pixmap; GdkBitmap *mask; } GtkCellPixmap;
+typedef struct { GtkCellType type; gint16 vertical, horizontal; GtkStyle *style; gchar *text; guint8 spacing;
+                 GdkPixmap *pixmap; GdkBitmap *mask; } GtkCellPixText;
+#define GTK_CELL_TEXT(cell)    (((GtkCellText *) &(cell)))
+#define GTK_CELL_PIXMAP(cell)  (((GtkCellPixmap *) &(cell)))
+#define GTK_CELL_PIXTEXT(cell) (((GtkCellPixText *) &(cell)))
+typedef struct _GtkCListRow { GtkCell *cell; GtkStateType state; GdkColor foreground, background; GtkStyle *style;
                               gpointer data; GDestroyNotify destroy; guint fg_set : 1, bg_set : 1, selectable : 1; } GtkCListRow;
 struct _GtkCList {
   GtkContainer parent_instance;

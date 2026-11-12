@@ -157,6 +157,16 @@ gboolean   gtk_switch_get_state (GtkSwitch *self);
 /* GtkEditable: implemented by GtkEntry and GtkSpinButton */
 typedef struct _GtkEditable GtkEditable;
 #define GTK_EDITABLE(o)    ((GtkEditable *) (o))
+/* GTK 1's public GtkEditable fields (the start of a GtkEntry), kept current */
+struct _GtkEditable {
+  GtkWidget widget;
+  guint current_pos;
+  guint selection_start_pos, selection_end_pos;
+  guint has_selection : 1, editable : 1, visible : 1;
+  gpointer ic, ic_attr;
+  gchar *clipboard_text;
+};
+typedef void (*GtkTextFunction) (GtkEditable *editable, guint32 time_);
 #define GTK_IS_EDITABLE(o) (GTK_IS_ENTRY (o))
 const char *gtk_editable_get_text (GtkEditable *editable);
 void        gtk_editable_set_text (GtkEditable *editable, const char *text);
@@ -177,7 +187,21 @@ void        gtk_editable_set_width_chars (GtkEditable *editable, gint n_chars);
 void        gtk_editable_set_alignment (GtkEditable *editable, gfloat xalign);
 
 /* GtkEntry + GtkEntryBuffer */
-typedef struct _GtkEntry { GtkWidget parent_instance; guint16 text_length; gboolean editable; } GtkEntry;  /* GTK 1/2 fields */
+/* GTK 1/2 public fields (text as wide characters, as in GTK 1.2) */
+typedef struct _GtkEntry {
+  GtkEditable editable;
+  GdkWindow *text_area;
+  gpointer backing_pixmap, cursor;
+  guint32 *text;
+  guint16 text_size, text_length, text_max_length;
+  gint scroll_offset;
+  guint visible : 1;
+  guint32 timer;
+  guint button;
+  gint *char_offset;
+  gchar *text_mb;
+  guint text_mb_dirty : 1, use_wchar : 1;
+} GtkEntry;
 typedef struct _GtkEntryClass { GtkWidgetClass parent_class; } GtkEntryClass;
 #define GTK_TYPE_ENTRY  (gtk_entry_get_type ())
 #define GTK_ENTRY(o)    (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_ENTRY, GtkEntry))

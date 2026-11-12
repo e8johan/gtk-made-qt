@@ -206,6 +206,7 @@ cairo_surface_t *gtkqt_canvas_surface (GtkWidget *w);
 QPixmap    gtkqt_qpixmap (GdkPixmap *pixmap, GdkBitmap *mask);      /* its backing image, for drawing outside expose */
 GdkWindow *gtkqt_drawable_new (int kind, GtkWidget *widget);
 cairo_surface_t *gtkqt_drawable_target (GdkDrawable *d);   /* nullptr when it cannot be drawn on now */
+QImage gtkqt_surface_image (cairo_surface_t *s);   /* a copy; RGB24 (pixmaps) comes out opaque */
 GtkStyle  *gtkqt_default_style_ref (void);
 QFont      gtkqt_font_from_pango (const PangoFontDescription *desc);
 PangoFontDescription *gtkqt_pango_from_font (const QFont &font);

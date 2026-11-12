@@ -17,7 +17,8 @@
  *   dump                       print the widget tree
  *   quit                       exit(0)
  * <widget> is a widget name (gtk_widget_set_name), a button or label text,
- * or a kind: textview, entry, treeview, window.
+ * a window title, or a kind: textview, entry, treeview, window. Programs that
+ * draw their own controls (XMMS skins) take "click <window title> 1 x y".
  * Licensed under the LGPL 2.1 or later; see COPYING.
  */
 #include "gtkqt-private.h"
@@ -47,7 +48,7 @@ static QWidget *find_widget (const QString &spec)
       if (spec == "textview" && qobject_cast<QTextEdit *> (w)) return w;
       if (spec == "entry" && qobject_cast<QLineEdit *> (w)) return w;
       if (spec == "treeview" && qobject_cast<QAbstractItemView *> (w)) return w;
-      if (spec == "window" && w == top) return w;
+      if (w == top && (spec == "window" || w->windowTitle () == spec)) return w;
       if (auto *b = qobject_cast<QAbstractButton *> (w); b && plain (b->text ()) == plain (spec)) return w;
       if (auto *lb = qobject_cast<QLabel *> (w); lb && plain (lb->text ()) == plain (spec)) return w;
     }
@@ -180,7 +181,21 @@ static void run_steps (QStringList steps)
       }
     } else if (cmd == "file") {
       QFileDialog *fd = nullptr;
-      for (QWidget *w : visible_windows ()) if ((fd = qobject_cast<QFileDialog *> (w))) break;
+      GtkWidget *fs1 = nullptr;   /* GTK 1's GtkFileSelection is made of GTK widgets */
+      for (QWidget *w : visible_windows ()) {
+        if ((fd = qobject_cast<QFileDialog *> (w))) break;
+        GtkWidget *g = gtkqt_from_qobject (w);
+        if (g && GTK_IS_FILE_SELECTION (g)) { fs1 = g; break; }
+      }
+      if (fs1) {
+        QByteArray name = QFile::encodeName (QFileInfo (rest).absoluteFilePath ());
+        gtk_file_selection_set_filename (GTK_FILE_SELECTION (fs1), name.constData ());
+        GtkWidget *ok = GTK_FILE_SELECTION (fs1)->ok_button;
+        g_object_ref (ok);
+        QTimer::singleShot (0, qApp, [ok] { gtk_button_clicked (GTK_BUTTON (ok)); g_object_unref (ok); });
+        next (steps, 300);
+        return;
+      }
       if (!fd) { fprintf (stderr, "script: no file dialog\n"); continue; }
       QFileInfo fi (rest);
       fd->setDirectory (fi.absolutePath ());

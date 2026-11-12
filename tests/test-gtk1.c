@@ -4,6 +4,7 @@
  * GtkArg-style setters. Built against the GTK 1.2 API level, run headless.
  */
 #include <gtk/gtk.h>
+#include <glib/gstdio.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -77,6 +78,32 @@ static void on_select (GtkWidget *w, gint row, gint col, GdkEventButton *ev, gpo
   selected_row = row;
 }
 
+/* selections: owner side and requesting side */
+static int sel_cleared;
+static char sel_received[64];
+static void on_sel_get (GtkWidget *w, GtkSelectionData *sd, guint info, guint time_, gpointer d)
+{
+  (void) w; (void) info; (void) time_; (void) d;
+  gtk_selection_data_set (sd, GDK_SELECTION_TYPE_STRING, 8, (const guchar *) "hello sel", 9);
+}
+static gint on_sel_clear (GtkWidget *w, GdkEventSelection *ev, gpointer d)
+{
+  (void) w; (void) d;
+  if (ev->type == GDK_SELECTION_CLEAR) sel_cleared++;
+  return TRUE;
+}
+static void on_sel_received (GtkWidget *w, GtkSelectionData *sd, guint time_, gpointer d)
+{
+  (void) w; (void) time_; (void) d;
+  if (sd->type == GDK_SELECTION_TYPE_STRING && sd->length > 0 && sd->length < 64) memcpy (sel_received, sd->data, sd->length);
+}
+static int item_activated;
+static void on_item_activate (GtkWidget *w, gpointer d) { (void) w; (void) d; item_activated++; }
+/* GTK 1.2's menu position function has no push_in argument */
+static gpointer pos_data;
+static void menu_pos (GtkMenu *m, gint *x, gint *y, gpointer data) { (void) m; *x = 5; *y = 5; pos_data = data; }
+static void pump (void) { for (int i = 0; i < 10; i++) { while (gtk_events_pending ()) gtk_main_iteration (); g_usleep (5000); } }
+
 static const char *xpm[] = { "4 2 2 1", ". c #ff0000", "  c None", ".. .", " .. " };
 
 int main (int argc, char **argv)
@@ -141,6 +168,102 @@ int main (int argc, char **argv)
   CHECK (realized == 1);
   CHECK (exposed > 0 && drew_text);
   CHECK (blob->allocation.width >= 60 && blob->allocation.height >= 40);
+  /* a labelled button has a GtkLabel child, as in GTK: programs relabel it */
+  gchar *str = NULL;
+  GtkWidget *button = gtk_button_new_with_label ("Cancel");
+  CHECK (GTK_BIN (button)->child && GTK_IS_LABEL (GTK_BIN (button)->child));
+  gtk_label_get (GTK_LABEL (GTK_BIN (button)->child), &str);
+  CHECK (str && strcmp (str, "Cancel") == 0);
+  gtk_container_remove (GTK_CONTAINER (button), GTK_BIN (button)->child);
+  CHECK (GTK_BIN (button)->child == NULL);
+  GtkWidget *close_label = gtk_label_new ("Close");
+  gtk_container_add (GTK_CONTAINER (button), close_label);
+  gtk_label_set_text (GTK_LABEL (close_label), "Close it");
+  gtk_label_get (GTK_LABEL (GTK_BIN (button)->child), &str);
+  CHECK (strcmp (str, "Close it") == 0);
+  gtk_box_pack_start (GTK_BOX (vbox), button, FALSE, FALSE, 0);
+  gtk_widget_show_all (button);
+
+  /* the option menu shows the chosen item's label as its child */
+  GtkWidget *om = gtk_option_menu_new (), *om_menu = gtk_menu_new ();
+  const char *names[] = { "one", "two" };
+  for (int i = 0; i < 2; i++) {
+    GtkWidget *it = gtk_menu_item_new_with_label (names[i]);
+    gtk_menu_append (GTK_MENU (om_menu), it);
+    gtk_widget_show (it);
+  }
+  gtk_option_menu_set_menu (GTK_OPTION_MENU (om), om_menu);
+  gtk_option_menu_set_history (GTK_OPTION_MENU (om), 1);
+  CHECK (GTK_BIN (om)->child && GTK_IS_LABEL (GTK_BIN (om)->child));
+  gtk_label_get (GTK_LABEL (GTK_BIN (om)->child), &str);
+  CHECK (strcmp (str, "two") == 0);
+  CHECK (gtk_option_menu_get_history (GTK_OPTION_MENU (om)) == 1);
+
+  /* setting a check menu item activates it (item factory callbacks run) */
+  GtkWidget *check = gtk_check_menu_item_new_with_label ("Graphical EQ");
+  gtk_signal_connect (GTK_OBJECT (check), "activate", GTK_SIGNAL_FUNC (on_item_activate), NULL);
+  gtk_check_menu_item_set_active (GTK_CHECK_MENU_ITEM (check), TRUE);
+  CHECK (item_activated == 1 && GTK_CHECK_MENU_ITEM (check)->active);
+  gtk_check_menu_item_set_active (GTK_CHECK_MENU_ITEM (check), TRUE);
+  CHECK (item_activated == 1);
+  gtk_menu_append (GTK_MENU (om_menu), check);
+
+  /* menu position function, GTK 1 signature */
+  static int marker;
+  GtkWidget *popup = gtk_menu_new ();
+  GtkWidget *pitem = gtk_menu_item_new_with_label ("item");
+  gtk_menu_append (GTK_MENU (popup), pitem);
+  gtk_widget_show (pitem);
+  gtk_menu_popup (GTK_MENU (popup), NULL, NULL, menu_pos, &marker, 3, 0);
+  CHECK (pos_data == &marker);
+  gtk_menu_popdown (GTK_MENU (popup));
+
+  /* selections: the owner supplies the text, a requester receives it, and
+     the owner is told when another widget claims the selection */
+  GtkWidget *owner = gtk_button_new_with_label ("owner"), *other = gtk_button_new_with_label ("other");
+  gtk_box_pack_start (GTK_BOX (vbox), owner, FALSE, FALSE, 0);
+  gtk_box_pack_start (GTK_BOX (vbox), other, FALSE, FALSE, 0);
+  gtk_widget_show (owner);
+  gtk_widget_show (other);
+  gtk_signal_connect (GTK_OBJECT (owner), "selection_get", GTK_SIGNAL_FUNC (on_sel_get), NULL);
+  gtk_signal_connect (GTK_OBJECT (owner), "selection_clear_event", GTK_SIGNAL_FUNC (on_sel_clear), NULL);
+  gtk_signal_connect (GTK_OBJECT (other), "selection_received", GTK_SIGNAL_FUNC (on_sel_received), NULL);
+  gtk_selection_add_target (owner, GDK_SELECTION_PRIMARY, GDK_SELECTION_TYPE_STRING, 1);
+  CHECK (gtk_selection_owner_set (owner, GDK_SELECTION_PRIMARY, GDK_CURRENT_TIME));
+  CHECK (gdk_selection_owner_get (GDK_SELECTION_PRIMARY) == owner->window);
+  CHECK (gtk_selection_convert (other, GDK_SELECTION_PRIMARY, GDK_SELECTION_TYPE_STRING, GDK_CURRENT_TIME));
+  pump ();
+  CHECK (strcmp (sel_received, "hello sel") == 0);
+  gtk_selection_owner_set (other, GDK_SELECTION_PRIMARY, GDK_CURRENT_TIME);
+  CHECK (sel_cleared == 1);
+
+  /* GtkFileSelection is made of GTK widgets programs can reach into */
+  GtkWidget *fsw = gtk_file_selection_new ("Load files");
+  GtkFileSelection *fs = GTK_FILE_SELECTION (fsw);
+  CHECK (GTK_IS_CLIST (fs->file_list) && GTK_IS_CLIST (fs->dir_list) && GTK_IS_ENTRY (fs->selection_entry));
+  CHECK (GTK_IS_BOX (fs->action_area) && GTK_IS_BUTTON (fs->ok_button) && GTK_BIN (fs->ok_button)->child);
+  gtk_clist_set_selection_mode (GTK_CLIST (fs->file_list), GTK_SELECTION_EXTENDED);
+  gchar *tmpdir = g_dir_make_tmp ("gtkqt-fsXXXXXX", NULL);
+  CHECK (tmpdir != NULL);
+  gchar *fa = g_build_filename (tmpdir, "a.wav", NULL), *fb = g_build_filename (tmpdir, "b.txt", NULL);
+  gchar *sub = g_build_filename (tmpdir, "sub", NULL);
+  g_file_set_contents (fa, "x", 1, NULL);
+  g_file_set_contents (fb, "x", 1, NULL);
+  g_mkdir (sub, 0700);
+  gtk_file_selection_set_filename (fs, fa);
+  CHECK (strcmp (gtk_file_selection_get_filename (fs), fa) == 0);
+  CHECK (GTK_CLIST (fs->file_list)->rows == 2 && GTK_CLIST (fs->dir_list)->rows == 3);   /* ./ ../ sub/ */
+  gtk_clist_get_text (GTK_CLIST (fs->dir_list), 2, 0, &str);
+  CHECK (strcmp (str, "sub/") == 0);
+  gtk_label_get (GTK_LABEL (GTK_BIN (fs->history_pulldown)->child), &str);
+  gchar *dirslash = g_strconcat (tmpdir, "/", NULL);
+  CHECK (strcmp (str, dirslash) == 0);
+  gtk_file_selection_complete (fs, "*.wav");
+  CHECK (GTK_CLIST (fs->file_list)->rows == 1);
+  gtk_widget_destroy (fsw);
+  g_remove (fa); g_remove (fb); g_rmdir (sub); g_rmdir (tmpdir);
+  g_free (fa); g_free (fb); g_free (sub); g_free (dirslash); g_free (tmpdir);
+
   printf ("gtk1 tests passed\n");
   return 0;
 }

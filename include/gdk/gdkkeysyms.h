@@ -294,6 +294,8 @@
 #define GDK_asciicircum GDK_KEY_asciicircum
 #define GDK_underscore GDK_KEY_underscore
 #define GDK_grave GDK_KEY_grave
+#define GDK_quoteleft GDK_KEY_grave
+#define GDK_quoteright GDK_KEY_apostrophe
 #define GDK_braceleft GDK_KEY_braceleft
 #define GDK_bar GDK_KEY_bar
 #define GDK_braceright GDK_KEY_braceright

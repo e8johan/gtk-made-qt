@@ -56,7 +56,9 @@ public:
 
 static QObject *window_create (GtkWidget *w)
 {
-  QWidget *win = GTK_IS_DIALOG (w) ? new GtkQtDialogWidget : new QWidget (nullptr, Qt::Window);
+  /* plain windows are canvases: programs draw on top-level windows too (XMMS) */
+  QWidget *win = GTK_IS_DIALOG (w) ? new GtkQtDialogWidget : qobject_cast<QWidget *> (gtkqt_canvas_create (w));
+  if (!GTK_IS_DIALOG (w)) win->setWindowFlags (Qt::Window);
   auto *l = new QVBoxLayout (win);
   l->setContentsMargins (0, 0, 0, 0);
   l->setSpacing (0);
@@ -213,9 +215,18 @@ void gtkqt_window_before_show (GtkWidget *w)
     qw->resize (sz);
   }
   QWidget *parent = d->transient_for ? gtkqt_qw (GTK_WIDGET (d->transient_for)) : nullptr;
+  /* a position the program set (gtk_window_move, gtk_widget_set_uposition) wins, as on X */
+  if (g_object_get_data (G_OBJECT (w), "gtkqt-positioned")) return;
   if (parent && (d->position == GTK_WIN_POS_CENTER_ON_PARENT || d->position == GTK_WIN_POS_NONE || GTK_IS_DIALOG (w))) {
     QRect pr = parent->frameGeometry ();
-    qw->move (pr.center () - QPoint (sz.width () / 2, sz.height () / 2));
+    QPoint p = pr.center () - QPoint (sz.width () / 2, sz.height () / 2);
+    /* a big window over a small one (a dialog over XMMS's player) stays on the screen */
+    if (QScreen *s = parent->screen ()) {
+      QRect a = s->availableGeometry ();
+      p.setX (qMax (a.left (), qMin (p.x (), a.right () + 1 - sz.width ())));
+      p.setY (qMax (a.top (), qMin (p.y (), a.bottom () + 1 - sz.height ())));
+    }
+    qw->move (p);
   } else if (d->position == GTK_WIN_POS_CENTER || d->position == GTK_WIN_POS_CENTER_ALWAYS) {
     if (QScreen *s = QGuiApplication::primaryScreen ())
       qw->move (s->availableGeometry ().center () - QPoint (sz.width () / 2, sz.height () / 2));
@@ -297,6 +308,7 @@ void gtk_window_get_size (GtkWindow *window, gint *width, gint *height)
 void gtk_window_move (GtkWindow *window, gint x, gint y)
 {
   if (QWidget *qw = gtkqt_qw (GTK_WIDGET (window))) qw->move (x, y);
+  g_object_set_data (G_OBJECT (window), "gtkqt-positioned", GINT_TO_POINTER (1));
 }
 
 void gtk_window_get_position (GtkWindow *window, gint *root_x, gint *root_y)
@@ -313,6 +325,7 @@ void gtk_window_set_resizable (GtkWindow *window, gboolean resizable)
   QWidget *qw = gtkqt_qw (GTK_WIDGET (window));
   if (!qw) return;
   g_object_set_data (G_OBJECT (window), "gtkqt-fixed-size", GINT_TO_POINTER (!resizable));
+  gtkqt_apply_size_request (GTK_WIDGET (window));
   if (QLayout *l = qw->layout ()) l->setSizeConstraint (resizable ? QLayout::SetDefaultConstraint : QLayout::SetFixedSize);
 }
 

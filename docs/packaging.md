@@ -10,12 +10,14 @@ A build-time package. Installed layout (`libdir` is `/usr/lib` on Arch,
 
 ```
 /usr/bin/gtk-made-qt-env                    sets PKG_CONFIG_PATH, LDFLAGS, PATH
-/usr/include/gtk-made-qt/{gtk,gdk}/         the GTK 1.2/2/3/4 headers
+/usr/include/gtk-made-qt/{gtk,gdk,X11}/     the GTK 1.2/2/3/4 headers, X11 headers
 <libdir>/gtk-made-qt/libgtk-made-qt.a       the library (static)
 <libdir>/gtk-made-qt/libgtk.so, libgdk.so, libgtk-x11-2.0.so, libgdk-x11-2.0.so,
                      libgtk-3.so, libgdk-3.so, libgtk-4.so
                                             GNU ld scripts: the archive + Qt
-<libdir>/gtk-made-qt/pkgconfig/             gtk+.pc, gtk+-2.0.pc, gtk+-3.0.pc, gtk4.pc ...
+<libdir>/gtk-made-qt/libgtkqt-x11.a, libX11.so, libXext.so
+                                            Xlib for programs calling it next to GDK
+<libdir>/gtk-made-qt/pkgconfig/             gtk+.pc, gtk+-2.0.pc, gtk+-3.0.pc, gtk4.pc, x11.pc ...
 <libdir>/gtk-made-qt/bin/                   gtk-config, glib-config (GTK 1.2 programs)
 <libdir>/gtk-made-qt/shared/                the same for the shared library
                                             (gtk-made-qt-env --shared)

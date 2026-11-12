@@ -64,6 +64,11 @@ puts ours first in `PATH`, so their configure scripts (`AM_PATH_GTK`) work
 unchanged. Most GLib 1.2 calls still exist in GLib 2; `glib-config` adds a
 small header for the few that do not.
 
+**Programs that call Xlib** next to GDK (`#include <gdk/gdkx.h>`,
+`X11/Xlib.h`, `-lX11`, `pkg-config x11`) get GTK made Qt's X11 headers and
+Xlib layer: window-manager hints, properties, atoms and drawing work on the
+GDK windows; there is no X server and no X event queue.
+
 **Programs with plugins**: when a program's own shared libraries or
 dlopen'ed plugins call GTK themselves (XMMS and its plugins, for example),
 they must all use one copy of the toolkit. Build such programs with

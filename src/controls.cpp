@@ -59,11 +59,13 @@ static QObject *label_create (GtkWidget *)
   return l;
 }
 
+static void label_mirror_to_button (GtkWidget *label);
 static void label_refresh (GtkWidget *w)
 {
   auto *l = gtkqt_q<QLabel> (w);
   LabelData *d = label_data (w);
   if (!l) return;
+  if (g_object_get_data (G_OBJECT (w), "gtkqt-button-text")) label_mirror_to_button (w);
   QByteArray raw = d->label.toUtf8 ();
   if (d->markup) {
     QString html = gtkqt_markup_to_html (raw.constData ());
@@ -324,11 +326,33 @@ static QObject *button_create (GtkWidget *w)
   return b;
 }
 
+/* A label inside a button (gtk_button_new_with_label makes one, as GTK does;
+ * GTK 1/2 programs reach it with GTK_BIN (button)->child) is shown as the
+ * Qt button's own text: its QLabel stays out of the button. */
+static bool syncing_button_label = false;
+static void label_mirror_to_button (GtkWidget *label)
+{
+  if (syncing_button_label) return;
+  auto *b = label->parent ? gtkqt_q<QAbstractButton> (label->parent) : nullptr;
+  if (!b) return;
+  LabelData *d = label_data (label);
+  QByteArray raw = d->label.toUtf8 ();
+  QString text = d->markup ? gtkqt_str (gtk_label_get_text (GTK_LABEL (label))) : d->label;
+  if (d->underline && !d->markup) b->setText (gtkqt_mnemonic (raw.constData ()));
+  else b->setText (text.replace ('&', QStringLiteral ("&&")));
+}
+
 static void button_place (GtkContainer *c, GtkWidget *child)
 {
   auto *b = gtkqt_q<QAbstractButton> (GTK_WIDGET (c));
   QWidget *cw = gtkqt_qw (child);
   if (!b || !cw) return;
+  if (GTK_IS_LABEL (child)) {
+    g_object_set_data (G_OBJECT (child), "gtkqt-button-text", GINT_TO_POINTER (1));
+    cw->hide ();
+    label_mirror_to_button (child);
+    return;
+  }
   if (!b->layout ()) {
     auto *l = new QHBoxLayout (b);
     l->setContentsMargins (8, 4, 8, 4);
@@ -343,7 +367,14 @@ static void gtk_button_init (GtkButton *) {}
 static void gtk_button_class_init (GtkButtonClass *klass)
 {
   gtkqt_set_create (GTK_WIDGET_CLASS (klass), button_create);
-  gtkqt_set_place (GTK_CONTAINER_CLASS (klass), button_place, gtkqt_bin_unplace_simple);
+  gtkqt_set_place (GTK_CONTAINER_CLASS (klass), button_place, [] (GtkContainer *c, GtkWidget *child) {
+    if (g_object_get_data (G_OBJECT (child), "gtkqt-button-text")) {
+      g_object_set_data (G_OBJECT (child), "gtkqt-button-text", nullptr);
+      if (auto *b = gtkqt_q<QAbstractButton> (GTK_WIDGET (c))) b->setText (QString ());
+      return;
+    }
+    gtkqt_bin_unplace_simple (c, child);
+  });
   GType t = G_TYPE_FROM_CLASS (klass);
   g_signal_new ("clicked", t, (GSignalFlags) (G_SIGNAL_RUN_FIRST | G_SIGNAL_ACTION), G_STRUCT_OFFSET (GtkButtonClass, clicked),
                 nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
@@ -562,6 +593,21 @@ static void button_update_text (GtkButton *button)
   } else {
     b->setText (gtkqt_str (label).replace ('&', QStringLiteral ("&&")));
   }
+  /* the label child, as GTK has one: made here, or kept in step */
+  GtkWidget *child = GTK_BIN (button)->child;
+  if (!label || (child && !GTK_IS_LABEL (child))) return;
+  QString shown = b->text ();
+  shown.remove (QRegularExpression (QStringLiteral ("&(?!&)"))).replace (QStringLiteral ("&&"), QStringLiteral ("&"));
+  QByteArray t = shown.toUtf8 ();
+  syncing_button_label = true;
+  if (!child) {
+    child = gtk_label_new (t.constData ());
+    gtk_container_add (GTK_CONTAINER (button), child);
+    gtk_widget_show (child);
+  } else {
+    gtk_label_set_text (GTK_LABEL (child), t.constData ());
+  }
+  syncing_button_label = false;
 }
 
 void gtk_button_set_label (GtkButton *button, const gchar *label)
@@ -887,6 +933,19 @@ static QLineEdit *editable_line (GtkEditable *e)
 
 static QObject *s_adopt = nullptr;   /* lets a GtkEntry wrap an existing QLineEdit */
 
+/* GTK 1's public GtkEntry fields: the text as wide characters and UTF-8 */
+static void entry_sync_fields (GtkEntry *entry, const QString &t)
+{
+  QVector<uint> u = t.toUcs4 ();
+  g_free (entry->text);
+  entry->text = g_new0 (guint32, u.size () + 1);
+  for (int i = 0; i < u.size (); i++) entry->text[i] = u[i];
+  entry->text_length = entry->text_size = u.size ();
+  g_free (entry->text_mb);
+  entry->text_mb = g_strdup (t.toUtf8 ().constData ());
+  entry->use_wchar = 1;
+}
+
 /* A QLineEdit whose typing, deleting, cutting and pasting go through the
  * GtkEditable signals "insert-text" and "delete-text", so handlers can
  * filter or veto the change as in GTK. */
@@ -971,11 +1030,22 @@ static QObject *entry_create (GtkWidget *w)
   if (s_adopt) { e = qobject_cast<QLineEdit *> (s_adopt); s_adopt = nullptr; g_object_set_data (G_OBJECT (w), "gtkqt-borrowed", GINT_TO_POINTER (1)); }
   else e = new GtkQtLineEdit (w);
   gtkqt_connect (w, e, &QLineEdit::textChanged, [] (GtkWidget *ew, const QString &t) {
-    if (GTK_IS_ENTRY (ew)) GTK_ENTRY (ew)->text_length = t.size ();
+    if (GTK_IS_ENTRY (ew)) entry_sync_fields (GTK_ENTRY (ew), t);
     g_signal_emit_by_name (ew, "changed");
     g_object_notify (G_OBJECT (ew), "text");
   });
   gtkqt_connect (w, e, &QLineEdit::returnPressed, [] (GtkWidget *ew) { g_signal_emit_by_name (ew, "activate"); });
+  auto cursor = [] (GtkWidget *ew) {
+    auto *l = qobject_cast<QLineEdit *> (ew->priv->obj.data ());
+    if (!l || !GTK_IS_ENTRY (ew)) return;
+    GtkEditable *ed = GTK_EDITABLE (ew);
+    ed->current_pos = l->cursorPosition ();
+    ed->has_selection = l->hasSelectedText ();
+    ed->selection_start_pos = l->hasSelectedText () ? l->selectionStart () : ed->current_pos;
+    ed->selection_end_pos = l->hasSelectedText () ? l->selectionEnd () : ed->current_pos;
+  };
+  gtkqt_connect (w, e, &QLineEdit::cursorPositionChanged, [cursor] (GtkWidget *ew, int, int) { cursor (ew); });
+  gtkqt_connect (w, e, &QLineEdit::selectionChanged, cursor);
   return e;
 }
 
@@ -984,6 +1054,10 @@ G_DEFINE_TYPE (GtkEntry, gtk_entry, GTK_TYPE_WIDGET)
 
 static void entry_dispose (GObject *o)
 {
+  if (GTK_IS_ENTRY (o)) {
+    g_free (GTK_ENTRY (o)->text); GTK_ENTRY (o)->text = nullptr;
+    g_free (GTK_ENTRY (o)->text_mb); GTK_ENTRY (o)->text_mb = nullptr;
+  }
   /* A borrowed QLineEdit (combo box entry) belongs to its QComboBox. */
   GtkWidget *w = GTK_WIDGET (o);
   if (g_object_get_data (o, "gtkqt-borrowed") && w->priv->obj) {
@@ -995,7 +1069,15 @@ static void entry_dispose (GObject *o)
   }
   G_OBJECT_CLASS (gtk_entry_parent_class)->dispose (o);
 }
-static void gtk_entry_init (GtkEntry *) {}
+static void gtk_entry_init (GtkEntry *e)
+{
+  e->editable.editable = 1;
+  e->editable.visible = 1;
+  e->visible = 1;
+  e->text = g_new0 (guint32, 1);
+  e->text_mb = g_strdup ("");
+  e->use_wchar = 1;
+}
 
 static void entry_real_insert_text (GtkEditable *editable, const gchar *new_text, gint len, gint *position)
 {
@@ -1101,6 +1183,8 @@ void gtk_entry_set_editable (GtkEntry *entry, gboolean editable) { gtk_editable_
 
 void gtk_entry_set_visibility (GtkEntry *entry, gboolean visible)
 {
+  entry->editable.visible = visible;
+  entry->visible = visible;
   if (QLineEdit *l = editable_line (GTK_EDITABLE (entry))) l->setEchoMode (visible ? QLineEdit::Normal : QLineEdit::Password);
 }
 
@@ -1244,7 +1328,11 @@ void gtk_editable_set_position (GtkEditable *editable, gint position)
 }
 
 gint gtk_editable_get_position (GtkEditable *editable) { QLineEdit *l = editable_line (editable); return l ? l->cursorPosition () : 0; }
-void gtk_editable_set_editable (GtkEditable *editable, gboolean is_editable) { if (QLineEdit *l = editable_line (editable)) l->setReadOnly (!is_editable); }
+void gtk_editable_set_editable (GtkEditable *editable, gboolean is_editable)
+{
+  if (GTK_IS_ENTRY (editable)) editable->editable = is_editable;
+  if (QLineEdit *l = editable_line (editable)) l->setReadOnly (!is_editable);
+}
 gboolean gtk_editable_get_editable (GtkEditable *editable) { QLineEdit *l = editable_line (editable); return l && !l->isReadOnly (); }
 void gtk_editable_cut_clipboard (GtkEditable *editable) { if (QLineEdit *l = editable_line (editable)) l->cut (); }
 void gtk_editable_copy_clipboard (GtkEditable *editable) { if (QLineEdit *l = editable_line (editable)) l->copy (); }
