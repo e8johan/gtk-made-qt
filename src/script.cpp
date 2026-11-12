@@ -17,7 +17,8 @@
  *   dump                       print the widget tree
  *   quit                       exit(0)
  * <widget> is a widget name (gtk_widget_set_name), a button or label text,
- * a window title, or a kind: textview, entry, treeview, window. Programs that
+ * a window title, or a kind: textview, entry, treeview, window; "#2" after
+ * it picks the second match. Programs that
  * draw their own controls (XMMS skins) take "click <window title> 1 x y".
  * Licensed under the LGPL 2.1 or later; see COPYING.
  */
@@ -37,21 +38,32 @@ static QList<QWidget *> visible_windows ()
   return l;
 }
 
-static QWidget *find_widget (const QString &spec)
+static QWidget *find_widget (const QString &specIn)
 {
+  /* "Configure#2": the second widget that matches */
+  QString spec = specIn;
+  int want = 1;
+  if (int hash = spec.lastIndexOf ('#'); hash > 0) {
+    bool ok = false;
+    int n = spec.mid (hash + 1).toInt (&ok);
+    if (ok && n > 0) { want = n; spec.truncate (hash); }
+  }
+  auto matches = [&spec] (QWidget *w, QWidget *top) {
+    if (w->objectName () == spec) return true;
+    if (spec == "textview") return qobject_cast<QTextEdit *> (w) != nullptr;
+    if (spec == "entry") return qobject_cast<QLineEdit *> (w) != nullptr;
+    if (spec == "treeview") return qobject_cast<QAbstractItemView *> (w) != nullptr;
+    if (w == top && (spec == "window" || w->windowTitle () == spec)) return true;
+    if (auto *b = qobject_cast<QAbstractButton *> (w)) return plain (b->text ()) == plain (spec);
+    if (auto *lb = qobject_cast<QLabel *> (w)) return plain (lb->text ()) == plain (spec);
+    return false;
+  };
+  int seen = 0;
   for (QWidget *top : visible_windows ()) {
     QList<QWidget *> all = top->findChildren<QWidget *> ();
     all.prepend (top);
-    for (QWidget *w : all) {
-      if (!w->isVisible ()) continue;
-      if (w->objectName () == spec) return w;
-      if (spec == "textview" && qobject_cast<QTextEdit *> (w)) return w;
-      if (spec == "entry" && qobject_cast<QLineEdit *> (w)) return w;
-      if (spec == "treeview" && qobject_cast<QAbstractItemView *> (w)) return w;
-      if (w == top && (spec == "window" || w->windowTitle () == spec)) return w;
-      if (auto *b = qobject_cast<QAbstractButton *> (w); b && plain (b->text ()) == plain (spec)) return w;
-      if (auto *lb = qobject_cast<QLabel *> (w); lb && plain (lb->text ()) == plain (spec)) return w;
-    }
+    for (QWidget *w : all)
+      if (w->isVisible () && matches (w, top) && ++seen == want) return w;
   }
   return nullptr;
 }

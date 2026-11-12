@@ -15,6 +15,16 @@ G_BEGIN_DECLS
   typedef struct _##TN##Class { PN##Class parent_class; } TN##Class;
 
 
+/* GtkItem (GTK 1/2): the parent of menu items and list items */
+GTKQT_SIMPLE_TYPE (GtkItem, GtkBin)
+#define GTK_TYPE_ITEM      (gtk_item_get_type ())
+#define GTK_ITEM(o)        (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_ITEM, GtkItem))
+#define GTK_IS_ITEM(o)     (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_ITEM))
+GType gtk_item_get_type (void) G_GNUC_CONST;
+void  gtk_item_select (GtkItem *item);
+void  gtk_item_deselect (GtkItem *item);
+void  gtk_item_toggle (GtkItem *item);
+
 /* GtkBox (+ GTK 2/3 GtkHBox / GtkVBox) */
 GTKQT_SIMPLE_TYPE (GtkBox, GtkContainer)
 GTKQT_SIMPLE_TYPE (GtkHBox, GtkBox)

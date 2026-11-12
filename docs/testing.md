@@ -65,6 +65,26 @@ tools/build-gtk1-examples.sh ~/src/gtk+-1.2.10 /tmp/gtk1-shots
 
 `packbox` needs an argument; `tree` uses GtkTree, which is not provided.
 
+## XMMS 1.2.11 (GTK 1.2 application)
+
+Build as in the PKGBUILD in [packaging.md](packaging.md) (shared library,
+time-stamp fix, configure flags). Use a scratch HOME with
+`output_plugin=.../Output/libdisk_writer.so` in `~/.xmms/config`, so that
+playback writes a WAV file instead of needing a sound card; uninstalled
+plugins can be copied to `~/.xmms/Plugins/<type>/`. XMMS draws its own
+buttons, so scripts click by window title and position:
+
+```bash
+GTKQT_SCRIPT="wait 1500; click XMMS 1 225 64; click XMMS 3 100 50; wait 500; quit"
+```
+
+(EQ button, then the right-click menu.) Ctrl+P opens Preferences,
+`click Configure#2` the output plugin's settings; `key L` opens the file
+browser and `file /path/song.wav` chooses a file and presses Play, after
+which the disk writer's output must have the file's full length. For the
+docked windows as a window manager-less X server shows them, run under
+Xvfb with `QT_QPA_PLATFORM=xcb` and `import -window root`.
+
 ## Memory
 
 ```bash

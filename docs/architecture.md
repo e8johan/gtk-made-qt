@@ -77,6 +77,17 @@ X-style backing store: a real exposure clears to the window background
 (colour or `gdk_window_set_back_pixmap`) and emits `expose-event`; drawing
 outside expose handlers lands in the backing image and is shown right after.
 
+Composite widgets are made of GTK widgets where programs reach inside: a
+labelled GtkButton has a GtkLabel child whose text the Qt button shows
+(also GtkOptionMenu's chosen item); GtkCombo's `list` is a GtkList of
+GtkListItems shown by the QComboBox; at API level 1 GtkFileSelection is
+built like GTK 1.2's (fileop buttons, history pulldown, directory and file
+GtkCLists, selection entry, OK/Cancel in `main_vbox`), while GTK 2 and
+later get Qt's file dialog. GtkItem is the parent of menu and list items.
+Selections go through Qt's clipboard (PRIMARY to the X selection where Qt
+has one): the owner's `selection-get` runs when it claims the selection,
+and it gets `selection-clear-event` when another owner takes it.
+
 GDK 1 fonts are X font names mapped to system fonts and drawn with Pango;
 XPM data and files load through Qt; masks become widget masks (shaped
 windows); GdkImage and GdkRGB are 32-bit images.

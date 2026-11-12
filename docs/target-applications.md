@@ -112,17 +112,22 @@ These widely used C applications exercise complex layouts, multi-view text buffe
 
 ---
 
-### Tier 3: Legacy GTK 1.2 Applications (Requires GLib 1.2 -> 2.0 Glue)
+### Tier 3: Legacy GTK 1.2 Applications
 
-Original GTK 1.2 codebases expect `gtk-config` and `glib-config` (GLib 1.2) rather than `pkg-config` and GLib 2.0. To compile them against `gtk-made-qt`:
+GTK 1.2 programs expect `gtk-config` and `glib-config` instead of
+pkg-config. GTK made Qt installs both (`gtk-made-qt-env` puts them first in
+`PATH`); they select API level 1 (`-DGTKQT_API_VERSION=1`), which provides
+GTK 1's type/signal/arg layer, GDK 1, the GTK 1 widgets and the GLib 1.2
+names GLib 2 dropped (`include/gtkqt-glib1.h`). Programs with plugins use
+`gtk-made-qt-env --shared`.
 
-1. **Provide a `gtk-config` wrapper script** in `PATH` that delegates `--cflags` and `--libs` to `pkg-config --cflags --libs gtk+-2.0` (which sets `-DGTKQT_API_VERSION=2` and enables `gtk_signal_connect`, `GTK_OBJECT`, `gtk_timeout_add`, and `GtkCList`/`GtkCombo`/`GtkOptionMenu` compatibility).
-2. **Bridge removed GLib 1.2 symbols** via a small force-included compatibility header (`-include glib1-compat.h`) mapping deprecated calls such as:
-   * `g_strcasecmp` / `g_strncasecmp` → `g_ascii_strcasecmp` / `g_ascii_strncasecmp`
-   * `g_string_sprintf` / `g_string_sprintfa` → `g_string_printf` / `g_string_append_printf`
-   * `GMemChunk` → `g_slice_alloc` / `g_malloc`
+#### 7. XMMS 1.2.11 (GTK 1.2) - done
 
-#### 7. XMMS 1.2.11 (GTK 1.2)
+Builds unmodified with all plugins and runs: skinned shaped windows,
+playlist, equalizer, menus, preferences, plugin dialogs, file browser,
+playback. See the PKGBUILD in [packaging.md](packaging.md) and the XMMS
+section of [testing.md](testing.md). Notes from before the port:
+
 * **Why it fits:** The classic Winamp-style audio player in pure C. Uses `GModule` for audio plugins and `GThread` for playback (both native in GLib 2.0), leaving only the skinned main window, playlist, and equalizer on the GTK shim.
 * **Key widgets exercised:** `GtkWindow` (borderless/shaped), `GtkDrawingArea`, `GtkMenu`, `GtkFileSelection` / `GtkFileChooserDialog`, `GtkScale`.
 * **Watch-outs:** Relies heavily on `GdkPixmap`, `GdkBitmap` window shape masks (`gtk_widget_shape_combine_mask`), and `gdk_draw_pixmap()` for skin blitting.

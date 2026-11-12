@@ -37,6 +37,29 @@ Things that cost time once; check here before debugging something similar.
   shared build exports it.
 - Programs with plugins calling GTK (XMMS) need the shared library: one
   toolkit, one GType registry, one QApplication.
+- Cairo leaves the top byte of RGB24 pixels undefined, and pixmaps loaded
+  from XPM have 0 there. Qt's `Format_RGB32` copies that byte as alpha, so
+  a skin drawn through it came out fully transparent (the test pattern,
+  drawn with cairo fills, had 0xff and worked). Convert with
+  `gtkqt_surface_image`.
+- A childless window with an empty QVBoxLayout and `SetFixedSize` is 0x0:
+  windows programs draw on take their size request instead.
+- Handlers destroy widgets in the middle of an emission (XMMS's
+  configure-event handler destroys its probe window): keep a reference
+  during event emission and show/hide, as GTK does.
+- `gtk_check_menu_item_set_active` activates the item: XMMS shows its
+  equalizer and playlist through item factory callbacks that way.
+- GTK 1's `GtkMenuPositionFunc` has no `push_in`; calling it the GTK 2 way
+  passes `&push_in` as the user data.
+- Programs reach into composite widgets: `GTK_BIN (button)->child` is the
+  label, `GTK_BIN (option_menu)->child` the chosen item's label,
+  `combo->list` a GtkList they fill, `filesel->file_list` a GtkCList.
+  These must be real GTK widgets, even where Qt draws the result.
+- GtkCList's `select_row` carries the button event; a double click emits
+  it again with `GDK_2BUTTON_PRESS` ("open this").
+- An explicit window position (`gtk_widget_set_uposition`) wins over
+  centering on the transient parent.
+- A GTK notebook asks for the width of all its tabs unless scrollable.
 
 ## Xlib
 

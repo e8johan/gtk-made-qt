@@ -237,6 +237,29 @@ int main (int argc, char **argv)
   gtk_selection_owner_set (other, GDK_SELECTION_PRIMARY, GDK_CURRENT_TIME);
   CHECK (sel_cleared == 1);
 
+  /* GtkCombo: combo->list is a GtkList; an item's string goes to the entry */
+  GtkWidget *combo = gtk_combo_new ();
+  CHECK (GTK_IS_LIST (GTK_COMBO (combo)->list));
+  GtkWidget *li = gtk_list_item_new_with_label ("Default PCM device (default)");
+  CHECK (GTK_IS_ITEM (li) && GTK_IS_ITEM (gtk_menu_item_new ()));
+  gtk_combo_set_item_string (GTK_COMBO (combo), GTK_ITEM (li), "default");
+  gtk_container_add (GTK_CONTAINER (GTK_COMBO (combo)->list), li);
+  gtk_widget_show (li);
+  GtkWidget *li2 = gtk_list_item_new_with_label ("hw:0,0");
+  gtk_container_add (GTK_CONTAINER (GTK_COMBO (combo)->list), li2);
+  gtk_widget_show (li2);
+  gtk_box_pack_start (GTK_BOX (vbox), combo, FALSE, FALSE, 0);
+  gtk_widget_show (combo);
+  pump ();
+  CHECK (strcmp (gtk_entry_get_text (GTK_ENTRY (GTK_COMBO (combo)->entry)), "default") == 0);   /* browse mode: first selected */
+  gtk_list_select_item (GTK_LIST (GTK_COMBO (combo)->list), 1);
+  CHECK (strcmp (gtk_entry_get_text (GTK_ENTRY (GTK_COMBO (combo)->entry)), "hw:0,0") == 0);
+  GList *hist = g_list_append (g_list_append (NULL, (gpointer) "http://a"), (gpointer) "http://b");
+  gtk_combo_set_popdown_strings (GTK_COMBO (combo), hist);
+  g_list_free (hist);
+  CHECK (g_list_length (GTK_LIST (GTK_COMBO (combo)->list)->children) == 2);
+  CHECK (strcmp (gtk_entry_get_text (GTK_ENTRY (GTK_COMBO (combo)->entry)), "http://a") == 0);
+
   /* GtkFileSelection is made of GTK widgets programs can reach into */
   GtkWidget *fsw = gtk_file_selection_new ("Load files");
   GtkFileSelection *fs = GTK_FILE_SELECTION (fsw);

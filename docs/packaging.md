@@ -126,42 +126,66 @@ package() {
 }
 ```
 
-## Example: PKGBUILD for XMMS 1.2 (GTK 1.2) on Qt - draft
+## Example: PKGBUILD for XMMS 1.2 (GTK 1.2) on Qt
 
-XMMS is the GTK 1.2 proof of concept: its plugins (output, input, visual)
-and `libxmms` call GTK themselves, so it is built against the shared
-library. **Status: not yet built** - the GTK 1.2 API level runs the GTK 1.2
-tutorial programs; building XMMS itself is the next step, so expect this
-recipe to change. The checksum has to be filled in from the release.
+XMMS is the GTK 1.2 proof of concept. Its plugins (output, input, effects,
+visualization) and `libxmms` call GTK themselves, so it is built against
+the shared library (`gtk-made-qt-env --shared`); the package then depends
+on `libgtk-made-qt.so.0`, which gtk-made-qt installs in the normal library
+directory. Tested with this recipe: all 17 plugins build, the binary and
+plugins need neither GTK nor libX11 (`wmxmms` calls Xlib and gets the Xlib
+layer built into the library).
+
+Notes:
+
+- The xmms.org downloads are not reliably reachable; the source is the
+  import of the 1.2.11 release tarball on GitHub, pinned to its commit.
+- A git checkout gives every file the same time stamp, and `make` would
+  then try to rerun automake 1.x. The `touch` lines restore the order of a
+  release tarball (sources, then `aclocal.m4`, then generated files).
+- `ac_cv_lib_SM_SmcOpenConnection=no` leaves out X11 session management
+  (libSM/libICE), which has no meaning without X.
+- `--disable-esd/--disable-opengl/--disable-mikmod`: EsounD is gone from
+  current systems, the OpenGL visualization uses GLX, MikMod is optional.
 
 ```bash
 pkgname=xmms-qtify
 pkgver=1.2.11
 pkgrel=1
+_commit=5847897230da018d93cd9833695f944ece96587b
 pkgdesc="XMMS, the GTK 1.2 audio player, built on Qt with GTK made Qt"
 arch=(x86_64 aarch64)
-url="https://www.xmms.org"
+url="https://github.com/deepfire/xmms"
 license=(GPL-2.0-or-later)
-depends=(qt6-base glib2 cairo pango gtk-made-qt alsa-lib libmad)
-makedepends=(pkgconf)
+depends=(qt6-base glib2 cairo pango gtk-made-qt alsa-lib libvorbis libogg)
+makedepends=(git pkgconf)
 provides=(xmms)
 conflicts=(xmms)
-source=("https://www.xmms.org/files/1.2.x/xmms-${pkgver}.tar.bz2")
-sha256sums=('SKIP')   # fill in from the release
+source=("git+https://github.com/deepfire/xmms.git#commit=${_commit}")
+sha256sums=(SKIP)
+
+prepare() {
+  cd xmms
+  # time stamps as in the release tarball, so make does not rerun automake
+  find . -path ./.git -prune -o -exec touch -h -d '2001-01-01 00:00' {} +
+  touch -d '2001-01-01 00:01' aclocal.m4
+  touch -d '2001-01-01 00:02' configure config.h.in $(find . -name Makefile.in)
+}
 
 build() {
-  cd "xmms-${pkgver}"
-  gtk-made-qt-env --shared ./configure --prefix=/usr --disable-esd --disable-opengl --disable-mikmod
+  cd xmms
+  gtk-made-qt-env --shared ./configure --prefix=/usr --disable-esd --disable-opengl \
+    --disable-mikmod --disable-nls ac_cv_lib_SM_SmcOpenConnection=no
   gtk-made-qt-env --shared make
 }
 
 check() {
-  cd "xmms-${pkgver}"
-  QT_QPA_PLATFORM=offscreen GTKQT_AUTOQUIT=1500 ./xmms/xmms
+  cd xmms
+  HOME="$srcdir/home" QT_QPA_PLATFORM=offscreen GTKQT_AUTOQUIT=1500 ./xmms/xmms
 }
 
 package() {
-  cd "xmms-${pkgver}"
+  cd xmms
   make DESTDIR="$pkgdir" install
 }
 ```

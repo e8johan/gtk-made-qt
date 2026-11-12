@@ -49,7 +49,7 @@ void       gtk_menu_append (GtkMenu *menu, GtkWidget *child);
 void       gtk_menu_prepend (GtkMenu *menu, GtkWidget *child);
 void       gtk_menu_bar_append (GtkMenuBar *menu, GtkWidget *child);
 
-GTKQT_SIMPLE_TYPE (GtkMenuItem, GtkBin)
+GTKQT_SIMPLE_TYPE (GtkMenuItem, GtkItem)
 #define GTK_TYPE_MENU_ITEM  (gtk_menu_item_get_type ())
 #define GTK_MENU_ITEM(o)    (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_MENU_ITEM, GtkMenuItem))
 #define GTK_IS_MENU_ITEM(o) (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_MENU_ITEM))

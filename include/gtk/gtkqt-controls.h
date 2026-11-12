@@ -282,6 +282,7 @@ GType      gtk_combo_get_type (void) G_GNUC_CONST;
 GtkWidget *gtk_combo_new (void);
 void       gtk_combo_set_popdown_strings (GtkCombo *combo, GList *strings);
 void       gtk_combo_set_value_in_list (GtkCombo *combo, gboolean val, gboolean ok_if_empty);
+void       gtk_combo_set_item_string (GtkCombo *combo, GtkItem *item, const gchar *item_value);
 
 /* GtkDropDown + GtkStringList (GTK 4) */
 GTKQT_SIMPLE_TYPE (GtkDropDown, GtkWidget)

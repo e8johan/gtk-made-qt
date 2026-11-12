@@ -1508,20 +1508,107 @@ gboolean gtk_combo_box_set_active_id (GtkComboBox *combo, const gchar *active_id
 
 void gtk_combo_box_popup (GtkComboBox *combo) { if (QComboBox *c = qcombo (combo)) c->showPopup (); }
 
+/* GtkCombo: as in GTK, combo->list is a GtkList of GtkListItems (programs
+ * fill it themselves); the Qt combo box shows those items. Choosing one
+ * selects it in the list, and the list's selection puts the item's string
+ * (gtk_combo_set_item_string, else its label) into the entry. */
+static const char *combo_item_string (GtkWidget *item)
+{
+  if (const char *s = (const char *) g_object_get_data (G_OBJECT (item), "gtkqt-combo-string")) return s;
+  GtkWidget *child = GTK_BIN (item)->child;
+  return child && GTK_IS_LABEL (child) ? gtk_label_get_text (GTK_LABEL (child)) : "";
+}
+
+static void combo_rebuild (GtkCombo *combo)
+{
+  QComboBox *c = qcombo (combo);
+  if (!c || !combo->list) return;
+  GtkList *list = GTK_LIST (combo->list);
+  QLineEdit *le = c->lineEdit ();
+  QString text = le ? le->text () : QString ();
+  {
+    QSignalBlocker b1 (c), b2 (le);
+    c->clear ();
+    for (GList *l = list->children; l; l = l->next) {
+      auto *item = (GtkWidget *) l->data;
+      GtkWidget *child = GTK_BIN (item)->child;
+      c->addItem (gtkqt_str (child && GTK_IS_LABEL (child) ? gtk_label_get_text (GTK_LABEL (child)) : combo_item_string (item)));
+    }
+    int sel = list->selection ? g_list_index (list->children, list->selection->data) : -1;
+    c->setCurrentIndex (sel);
+    if (le) le->setText (text);
+  }
+  /* GTK's combo list is in browse mode: with items, one is always selected */
+  if (!list->selection && list->children) gtk_list_select_child (list, (GtkWidget *) list->children->data);
+}
+
+static void combo_schedule_rebuild (GtkCombo *combo)
+{
+  if (g_object_get_data (G_OBJECT (combo), "gtkqt-combo-rebuild")) return;
+  g_object_set_data (G_OBJECT (combo), "gtkqt-combo-rebuild", GINT_TO_POINTER (1));
+  g_object_ref (combo);
+  QTimer::singleShot (0, qApp, [combo] {
+    g_object_set_data (G_OBJECT (combo), "gtkqt-combo-rebuild", nullptr);
+    if (GTK_WIDGET (combo)->priv && !GTK_WIDGET (combo)->priv->destroyed) combo_rebuild (combo);
+    g_object_unref (combo);
+  });
+}
+
+static void combo_list_changed (GtkContainer *, GtkWidget *, gpointer combo) { combo_schedule_rebuild (GTK_COMBO (combo)); }
+
+static void combo_selection_changed (GtkList *list, gpointer cp)
+{
+  auto *combo = GTK_COMBO (cp);
+  if (!list->selection) return;
+  auto *item = (GtkWidget *) list->selection->data;
+  if (QComboBox *c = qcombo (combo)) {
+    QSignalBlocker b (c);
+    c->setCurrentIndex (g_list_index (list->children, item));
+  }
+  if (combo->entry) gtk_entry_set_text (GTK_ENTRY (combo->entry), combo_item_string (item));
+}
+
 GtkWidget *gtk_combo_new (void)
 {
   GtkWidget *w = (GtkWidget *) g_object_new (GTK_TYPE_COMBO, nullptr);
   combo_make_entry (w);
+  auto *combo = GTK_COMBO (w);
+  combo->list = (GtkWidget *) g_object_ref_sink (gtk_list_new ());
+  gtk_list_set_selection_mode (GTK_LIST (combo->list), GTK_SELECTION_BROWSE);
+  g_signal_connect_after (combo->list, "add", G_CALLBACK (combo_list_changed), w);
+  g_signal_connect_after (combo->list, "remove", G_CALLBACK (combo_list_changed), w);
+  g_signal_connect (combo->list, "selection-changed", G_CALLBACK (combo_selection_changed), w);
+  g_object_set_data_full (G_OBJECT (w), "gtkqt-combo-list", combo->list, [] (gpointer p) {
+    g_signal_handlers_disconnect_matched (p, G_SIGNAL_MATCH_FUNC, 0, 0, nullptr, (gpointer) combo_list_changed, nullptr);
+    g_signal_handlers_disconnect_matched (p, G_SIGNAL_MATCH_FUNC, 0, 0, nullptr, (gpointer) combo_selection_changed, nullptr);
+    gtk_widget_destroy ((GtkWidget *) p);
+    g_object_unref (p);
+  });
+  if (QComboBox *c = qcombo (w))
+    gtkqt_connect (w, c, QOverload<int>::of (&QComboBox::activated), [] (GtkWidget *cw, int i) {
+      GtkList *list = GTK_LIST (GTK_COMBO (cw)->list);
+      if (auto *item = (GtkWidget *) g_list_nth_data (list->children, i)) gtk_list_select_child (list, item);
+    });
   return w;
+}
+
+void gtk_combo_set_item_string (GtkCombo *combo, GtkItem *item, const gchar *item_value)
+{
+  g_object_set_data_full (G_OBJECT (item), "gtkqt-combo-string", g_strdup (item_value), g_free);
+  if (combo) combo_schedule_rebuild (combo);
 }
 
 void gtk_combo_set_popdown_strings (GtkCombo *combo, GList *strings)
 {
-  QComboBox *c = qcombo (combo);
-  if (!c) return;
-  c->clear ();
-  for (GList *l = strings; l; l = l->next) c->addItem (gtkqt_str ((const char *) l->data));
-  c->setCurrentIndex (0);
+  if (!combo->list) return;
+  GtkList *list = GTK_LIST (combo->list);
+  gtk_list_clear_items (list, 0, -1);
+  for (GList *l = strings; l; l = l->next) {
+    GtkWidget *item = gtk_list_item_new_with_label ((const char *) l->data);
+    gtk_widget_show (item);
+    gtk_container_add (GTK_CONTAINER (list), item);
+  }
+  combo_rebuild (combo);   /* now: the first string shows in the entry, as in GTK */
 }
 
 void gtk_combo_set_value_in_list (GtkCombo *combo, gboolean val, gboolean)
