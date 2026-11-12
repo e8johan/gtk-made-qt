@@ -170,7 +170,8 @@ void       gtk_paned_set_position (GtkPaned *paned, gint position);
 gint       gtk_paned_get_position (GtkPaned *paned);
 
 /* GtkNotebook */
-GTKQT_SIMPLE_TYPE (GtkNotebook, GtkContainer)
+typedef struct _GtkNotebook { GtkContainer parent_instance; GtkPositionType tab_pos; guint show_tabs : 1, show_border : 1, scrollable : 1; } GtkNotebook;
+typedef struct _GtkNotebookClass { GtkContainerClass parent_class; } GtkNotebookClass;
 #define GTK_TYPE_NOTEBOOK (gtk_notebook_get_type ())
 #define GTK_NOTEBOOK(o)   (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_NOTEBOOK, GtkNotebook))
 #define GTK_IS_NOTEBOOK(o) (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_NOTEBOOK))

@@ -29,6 +29,9 @@
 #include <QAction>
 #include <QHash>
 #include <QFont>
+#include <QImage>
+#include <QPixmap>
+#include <QKeySequence>
 #include <QEvent>
 
 #include <functional>
@@ -194,7 +197,13 @@ struct _GdkWindow {
   int width, height, depth;       /* pixmaps */
   GdkColor background;
   bool has_background;
+  GdkPixmap *back_pixmap;         /* window background pixmap (gdk_window_set_back_pixmap) */
+  QImage *image;                  /* GdkImage-free fast path unused; reserved */
+  gint event_mask;
 };
+QObject   *gtkqt_canvas_create (GtkWidget *w);             /* a widget the program draws on (backing store) */
+cairo_surface_t *gtkqt_canvas_surface (GtkWidget *w);
+QPixmap    gtkqt_qpixmap (GdkPixmap *pixmap, GdkBitmap *mask);      /* its backing image, for drawing outside expose */
 GdkWindow *gtkqt_drawable_new (int kind, GtkWidget *widget);
 cairo_surface_t *gtkqt_drawable_target (GdkDrawable *d);   /* nullptr when it cannot be drawn on now */
 GtkStyle  *gtkqt_default_style_ref (void);
@@ -203,6 +212,7 @@ PangoFontDescription *gtkqt_pango_from_font (const QFont &font);
 extern QHash<QString, QByteArray> gtkqt_user_stock_labels;
 extern QHash<QString, QIcon> gtkqt_user_icons;
 void       gtkqt_accel_group_detach (GtkAccelGroup *group, QWidget *window);
+gboolean   gtkqt_accel_group_trigger (GtkAccelGroup *group, const QKeySequence &seq);
 QObject   *gtkqt_file_dialog_create (GtkWidget *w);
 
 /* ---------- misc ---------- */

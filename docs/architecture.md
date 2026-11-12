@@ -57,11 +57,42 @@ QFontDialog. GtkPrintOperation draws each page with cairo in points onto an
 image at the printer's resolution and gives it to QPrinter (print dialog,
 preview, or PDF).
 
+## GTK 1.2
+
+API level 1 adds GTK 1's type and signal layer on GObject: `GtkTypeInfo` and
+`gtk_type_unique` register GTypes, `gtk_signal_new` creates signals with
+class-offset closures, `gtk_widget_set ("GtkWidget::width", ...)` maps onto
+properties. For API levels 1 and 2 `GtkObject` and `GtkObjectClass` are
+declared so that `object->klass`, `klass->type` and `object_class->destroy`
+are the GObject fields at the same place. GTK 1 code often keeps a type in a
+`guint`, which truncates a 64-bit GType; the `gtk_type_*` calls and
+`GTK_CHECK_*` macros recover such types from their low 32 bits.
+
+Program-defined widget classes that draw themselves (overriding
+`expose_event`, `size_request` or `draw`) get a canvas: their `realize` runs
+before the first show (its `gdk_window_new` + `gdk_window_set_user_data`
+binds the program's GdkWindow to the canvas), `size_request` is the size
+hint, and GTK's event signals call the class methods. Canvases keep an
+X-style backing store: a real exposure clears to the window background
+(colour or `gdk_window_set_back_pixmap`) and emits `expose-event`; drawing
+outside expose handlers lands in the backing image and is shown right after.
+
+GDK 1 fonts are X font names mapped to system fonts and drawn with Pango;
+XPM data and files load through Qt; masks become widget masks (shaped
+windows); GdkImage and GdkRGB are 32-bit images.
+
 ## Linking
 
 `libgtk-made-qt.a` with hidden visibility. `lib/libgtk-x11-2.0.so`,
-`libgtk-3.so`, `libgtk-4.so` ... are GNU ld scripts naming the archive and
-Qt, so `-lgtk-x11-2.0` works unchanged. A finished program exports no GTK
-symbol, so a real GTK loaded into the process by something else (Qt's GTK
-platform theme, an input method) cannot meet ours; the library also tells Qt
-not to use the GTK platform theme.
+`libgtk-3.so`, `libgtk-4.so`, `libgtk.so` ... are GNU ld scripts naming the
+archive and Qt, so `-lgtk-x11-2.0` works unchanged. A finished program
+exports no GTK symbol (even with `--export-dynamic`, which GTK's pkg-config
+files add), so a real GTK loaded into the process by something else (Qt's
+GTK platform theme, an input method) cannot meet ours; the library also
+tells Qt not to use the GTK platform theme.
+
+A static library cannot serve a program whose shared libraries or plugins
+call GTK too: each would get its own copy. The objects are therefore built
+a second time with the API exported, as `libgtk-made-qt.so.0`;
+`<libdir>/gtk-made-qt/shared` has pkg-config files, `gtk-config` and
+`lib<name>.so` links for it (`gtk-made-qt-env --shared`).

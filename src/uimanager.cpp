@@ -36,6 +36,13 @@ void gtkqt_accel_group_attach (GtkAccelGroup *group, QWidget *window)
   for (const QPointer<QAction> &a : accel (group)->actions) if (a) window->addAction (a);
 }
 
+gboolean gtkqt_accel_group_trigger (GtkAccelGroup *group, const QKeySequence &seq)
+{
+  for (const QPointer<QAction> &a : accel (group)->actions)
+    if (a && a->isEnabled () && a->shortcuts ().contains (seq)) { a->trigger (); return TRUE; }
+  return FALSE;
+}
+
 void gtkqt_accel_group_detach (GtkAccelGroup *group, QWidget *window)
 {
   if (!window) return;

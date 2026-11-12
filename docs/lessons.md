@@ -23,6 +23,21 @@ Things that cost time once; check here before debugging something similar.
 - Print contexts work in points (72 dpi) with the origin at the margin;
   programs draw headers at negative y.
 
+## GTK 1.2
+
+- GTK 1 code stores types in `guint` (`static guint my_type`): a 64-bit
+  GType is cut in half. Recover it from the low 32 bits of the registered
+  types (`gtkqt_type_fix`).
+- Custom widgets create their GdkWindow in `realize` and bind it with
+  `gdk_window_set_user_data`: realize must run before the first expose.
+- A GTK size request is a minimum: widgets need `minimumSizeHint`, or a
+  table column of them collapses to nothing.
+- GTK's pkg-config files pull in `--export-dynamic` (gmodule-export): with
+  default visibility a static program would export the whole API. Only the
+  shared build exports it.
+- Programs with plugins calling GTK (XMMS) need the shared library: one
+  toolkit, one GType registry, one QApplication.
+
 ## Implementation pitfalls
 
 - Static functions in an `extern "C"` block have C linkage: their forward

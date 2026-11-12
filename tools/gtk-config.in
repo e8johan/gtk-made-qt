@@ -1,0 +1,30 @@
+#!/bin/sh
+# gtk-config for GTK 1.2 programs: answers from GTK made Qt's gtk+.pc
+# (the GTK 1.2 API level on Qt). Installed in <libdir>/gtk-made-qt/bin,
+# which gtk-made-qt-env puts first in PATH.
+pcdir="@GTKQT_CONFIG_PCDIR@"
+pc="env PKG_CONFIG_PATH=$pcdir${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH} pkg-config"
+mods="gtk+"
+out=""
+usage() { echo "usage: gtk-config [--prefix] [--exec-prefix] [--version] [--libs] [--cflags] [gthread]" >&2; exit 1; }
+[ $# -eq 0 ] && usage
+for a in "$@"; do
+  case $a in
+    gthread) mods="$mods gthread-2.0" ;;
+    gmodule) mods="$mods gmodule-2.0" ;;
+    glib|gtk) ;;
+  esac
+done
+for a in "$@"; do
+  case $a in
+    --version) echo 1.2.10 ;;
+    --prefix=*|--exec-prefix=*) ;;
+    --prefix|--exec-prefix) $pc --variable=prefix gtk+ 2>/dev/null || echo /usr ;;
+    --cflags) out="$out $($pc --cflags $mods)" ;;
+    --libs) out="$out $($pc --libs $mods)" ;;
+    gthread|gmodule|glib|gtk) ;;
+    *) usage ;;
+  esac
+done
+[ -n "$out" ] && echo $out
+exit 0

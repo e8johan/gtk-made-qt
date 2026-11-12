@@ -34,8 +34,22 @@ typedef struct { gint16 left, right, top, bottom; } GtkBorder;
 
 /* GtkObject (GTK 1/2) is the floating-reference base class: that is
  * GInitiallyUnowned in GTK 3+, and it is here too. */
+#if GTKQT_API_VERSION <= 2 && !defined (GTKQT_COMPILATION)
+/* GTK 1/2 programs reach the class through object->klass and read
+ * klass->type, and set object_class->destroy: the same memory as GObject's
+ * g_class / g_type, and GtkWidgetClass's destroy slot. */
+struct _GtkObject;
+typedef struct _GtkObjectClass {
+  union { GInitiallyUnownedClass parent_class; GType type; };
+  void (*destroy) (struct _GtkObject *object);
+} GtkObjectClass;
+typedef struct _GtkObject {
+  union { GInitiallyUnowned parent_instance; GtkObjectClass *klass; };
+} GtkObject;
+#else
 typedef GInitiallyUnowned GtkObject;
 typedef GInitiallyUnownedClass GtkObjectClass;
+#endif
 #define GTK_TYPE_OBJECT       G_TYPE_INITIALLY_UNOWNED
 #define GTK_OBJECT(obj)       ((GtkObject *) (obj))
 #define GTK_IS_OBJECT(obj)    G_IS_INITIALLY_UNOWNED (obj)
@@ -58,6 +72,9 @@ struct _GtkWidget {
   GtkAllocation allocation;
   GdkWindow *window;
   GtkWidget *parent;
+  guint8 state;               /* GtkStateType */
+  guint8 saved_state;
+  gchar *name;
   /*< private >*/
   GtkWidgetPrivate *priv;
 };
@@ -74,6 +91,7 @@ struct _GtkWidgetClass {
   void     (*realize)              (GtkWidget *widget);
   void     (*unrealize)            (GtkWidget *widget);
   void     (*size_allocate)        (GtkWidget *widget, GtkAllocation *allocation);
+  void     (*size_request)         (GtkWidget *widget, GtkRequisition *requisition);   /* GTK 1/2 */
   gboolean (*draw)                 (GtkWidget *widget, cairo_t *cr);
   gboolean (*event)                (GtkWidget *widget, GdkEvent *event);
   gboolean (*button_press_event)   (GtkWidget *widget, GdkEventButton *event);

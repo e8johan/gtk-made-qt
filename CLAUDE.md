@@ -24,6 +24,9 @@ File/Open...; file /tmp/x.txt; shot a.png; quit"` (see docs/testing.md).
   `uimanager.cpp`, `application.cpp`
 - `src/gtk2.cpp` GTK 1/2 era API: GdkDrawable/GdkGC on cairo, GtkStyle,
   Pango glue, item factory, clipboard, DnD, file/font selection
+- `src/gtk1.cpp` GTK 1.2 type/signal/arg layer, GDK 1 (fonts, cursors, XPM,
+  images, RGB, windows); `src/gtk1widgets.cpp` GtkCList/CTree, GtkList,
+  GtkText, GtkPacker, GtkRuler, GtkCalendar ...
 - `src/print.cpp` GtkPrintOperation on QPrinter; `src/script.cpp` GTKQT_SCRIPT
 - `examples/gtk2|3|4` programs built unmodified; `tests/` regression tests
 
@@ -34,9 +37,11 @@ File/Open...; file /tmp/x.txt; shot a.png; quit"` (see docs/testing.md).
 - GTK signals with GTK semantics: changes go through the signal's default
   handler (text buffer insert-text/delete-range, editable insert-text) so
   programs can veto them
-- Public GTK 2 struct fields programs read (widget->style, ->window,
+- Static archive keeps the API hidden; the shared build (`--shared`, for
+  programs with plugins) exports it (`GTKQT_EXPORT_API`)
+- Public GTK 1/2 struct fields programs read (widget->style, ->window,
   GtkTextView->buffer, GtkDialog->vbox ...) are kept current
-- `GTKQT_API_VERSION` (2/3/4, from the .pc files) selects per-generation
+- `GTKQT_API_VERSION` (1/2/3/4, from the .pc files / gtk-config) selects per-generation
   spellings in `gtkqt-compat.h`; runtime checks use `gtkqt_api`
 - Verify against real GTK: same program built with the system GTK under
   Xvfb, screenshots side by side (docs/testing.md)

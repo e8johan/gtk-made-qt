@@ -1406,7 +1406,7 @@ static void notebook_add (GtkContainer *c, GtkWidget *child)
 }
 
 G_DEFINE_TYPE (GtkNotebook, gtk_notebook, GTK_TYPE_CONTAINER)
-static void gtk_notebook_init (GtkNotebook *) {}
+static void gtk_notebook_init (GtkNotebook *n) { n->tab_pos = GTK_POS_TOP; n->show_tabs = 1; n->show_border = 1; }
 static void gtk_notebook_class_init (GtkNotebookClass *klass)
 {
   gtkqt_set_create (GTK_WIDGET_CLASS (klass), notebook_create);
@@ -1496,17 +1496,20 @@ void gtk_notebook_prev_page (GtkNotebook *notebook)
 
 void gtk_notebook_set_tab_pos (GtkNotebook *notebook, GtkPositionType pos)
 {
+  notebook->tab_pos = pos;
   static const QTabWidget::TabPosition map[] = { QTabWidget::West, QTabWidget::East, QTabWidget::North, QTabWidget::South };
   if (auto *t = gtkqt_q<QTabWidget> (GTK_WIDGET (notebook))) t->setTabPosition (map[pos & 3]);
 }
 
 void gtk_notebook_set_show_tabs (GtkNotebook *notebook, gboolean show_tabs)
 {
+  notebook->show_tabs = show_tabs;
   if (auto *t = gtkqt_q<QTabWidget> (GTK_WIDGET (notebook))) t->tabBar ()->setVisible (show_tabs);
 }
 
 void gtk_notebook_set_show_border (GtkNotebook *notebook, gboolean show_border)
 {
+  notebook->show_border = show_border;
   if (auto *t = gtkqt_q<QTabWidget> (GTK_WIDGET (notebook))) t->setDocumentMode (!show_border);
 }
 

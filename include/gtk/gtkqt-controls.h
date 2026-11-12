@@ -177,7 +177,8 @@ void        gtk_editable_set_width_chars (GtkEditable *editable, gint n_chars);
 void        gtk_editable_set_alignment (GtkEditable *editable, gfloat xalign);
 
 /* GtkEntry + GtkEntryBuffer */
-GTKQT_SIMPLE_TYPE (GtkEntry, GtkWidget)
+typedef struct _GtkEntry { GtkWidget parent_instance; guint16 text_length; gboolean editable; } GtkEntry;  /* GTK 1/2 fields */
+typedef struct _GtkEntryClass { GtkWidgetClass parent_class; } GtkEntryClass;
 #define GTK_TYPE_ENTRY  (gtk_entry_get_type ())
 #define GTK_ENTRY(o)    (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_ENTRY, GtkEntry))
 #define GTK_IS_ENTRY(o) (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_ENTRY))

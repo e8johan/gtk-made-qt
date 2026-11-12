@@ -216,7 +216,7 @@ extern "C" {
 
 gboolean gtkqt_init_check (int *argc, char ***argv, int api_version)
 {
-  if (api_version >= 2 && api_version <= 4)
+  if (api_version >= 1 && api_version <= 4)
     gtkqt_api = api_version;
   if (argc && argv && *argv && *argc > 0 && !g_get_prgname ()) {
     gchar *base = g_path_get_basename ((*argv)[0]);
@@ -556,9 +556,35 @@ void gtkqt_set_create (GtkWidgetClass *klass, GtkQtCreateFunc create)
   klass->gtkqt_create = (gpointer) create;
 }
 
-static QObject *widget_default_create (GtkWidget *)
+/* Program-defined widget classes that draw themselves (GTK 1/2 custom
+ * widgets overriding expose_event, size_request or draw) get a canvas. */
+static gboolean widget_class_draws (GtkWidget *w)
 {
+  auto *k = GTK_WIDGET_GET_CLASS (w);
+  auto *base = (GtkWidgetClass *) g_type_class_peek (GTK_TYPE_WIDGET);
+  return k->expose_event != base->expose_event || k->size_request != base->size_request || k->draw != base->draw;
+}
+
+static QObject *widget_default_create (GtkWidget *w)
+{
+  if (widget_class_draws (w)) return gtkqt_canvas_create (w);
   return new QWidget;
+}
+
+static void widget_default_realize (GtkWidget *w)
+{
+  w->flags |= GTK_REALIZED;
+  gtkqt_gdk_window (w);
+}
+
+/* GTK emits realize before a widget is first drawn; GTK 1/2 custom widgets
+ * create their GdkWindow there. */
+static void ensure_realized (GtkWidget *w)
+{
+  if (!w || (w->flags & GTK_REALIZED) || !w->priv || w->priv->destroyed) return;
+  if (w->parent && !(w->parent->flags & GTK_REALIZED)) ensure_realized (w->parent);
+  w->flags |= GTK_REALIZED;
+  g_signal_emit (w, widget_signals[SIG_REALIZE], 0);
 }
 
 QObject *gtkqt_obj (GtkWidget *w)
@@ -724,6 +750,7 @@ static void gtk_widget_class_init (GtkWidgetClass *klass)
   oc->dispose = gtk_widget_dispose;
   oc->finalize = gtk_widget_finalize;
   klass->destroy = gtk_widget_real_destroy;
+  klass->realize = widget_default_realize;
   klass->gtkqt_create = (gpointer) widget_default_create;
 
   GType t = G_TYPE_FROM_CLASS (klass);
@@ -981,6 +1008,7 @@ bool GtkQtBridge::eventFilter (QObject *watched, QEvent *e)
     return false;
   }
   case QEvent::Show:
+    ensure_realized (w);
     w->flags |= GTK_MAPPED | GTK_REALIZED;
     g_signal_emit (w, widget_signals[SIG_MAP], 0);
     return false;
@@ -1188,7 +1216,7 @@ gboolean gtk_widget_get_mapped (GtkWidget *widget)
 }
 
 gboolean gtk_widget_get_realized (GtkWidget *widget) { return gtkqt_obj (widget) != nullptr; }
-void gtk_widget_realize (GtkWidget *widget) { gtkqt_obj (widget); }
+void gtk_widget_realize (GtkWidget *widget) { gtkqt_obj (widget); ensure_realized (widget); }
 void gtk_widget_map (GtkWidget *widget) { gtk_widget_show (widget); }
 
 void gtk_widget_set_sensitive (GtkWidget *widget, gboolean sensitive)

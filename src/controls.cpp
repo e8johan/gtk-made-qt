@@ -970,7 +970,8 @@ static QObject *entry_create (GtkWidget *w)
   QLineEdit *e;
   if (s_adopt) { e = qobject_cast<QLineEdit *> (s_adopt); s_adopt = nullptr; g_object_set_data (G_OBJECT (w), "gtkqt-borrowed", GINT_TO_POINTER (1)); }
   else e = new GtkQtLineEdit (w);
-  gtkqt_connect (w, e, &QLineEdit::textChanged, [] (GtkWidget *ew, const QString &) {
+  gtkqt_connect (w, e, &QLineEdit::textChanged, [] (GtkWidget *ew, const QString &t) {
+    if (GTK_IS_ENTRY (ew)) GTK_ENTRY (ew)->text_length = t.size ();
     g_signal_emit_by_name (ew, "changed");
     g_object_notify (G_OBJECT (ew), "text");
   });
