@@ -37,71 +37,174 @@ static DrawData *draw_data (GtkWidget *w)
   return d;
 }
 
+/* A widget the program draws on: GtkDrawingArea, and program-defined
+ * widget classes (GTK 1/2 custom widgets). Like an X window with backing
+ * store it keeps its pixels: a real exposure clears the area to the window
+ * background (colour or background pixmap) and emits expose-event / draw;
+ * drawing at any other time lands in the backing image and is shown
+ * straight after. */
 class GtkQtDrawingWidget : public QWidget {
 public:
+  QImage backing;
+  cairo_surface_t *surface = nullptr;
+  bool blit_only = false, flush_pending = false, painting = false;
+
+  ~GtkQtDrawingWidget () override { if (surface) cairo_surface_destroy (surface); }
+
   QSize sizeHint () const override
   {
     GtkWidget *w = gtkqt_from_qobject (const_cast<GtkQtDrawingWidget *> (this));
-    DrawData *d = w ? static_cast<DrawData *> (g_object_get_data (G_OBJECT (w), "gtkqt-draw")) : nullptr;
-    if (d && (d->cw > 0 || d->ch > 0)) return QSize (qMax (d->cw, 1), qMax (d->ch, 1));
+    if (!w || !w->priv || w->priv->destroyed) return QSize (0, 0);
+    if (GTK_IS_DRAWING_AREA (w)) {
+      DrawData *d = static_cast<DrawData *> (g_object_get_data (G_OBJECT (w), "gtkqt-draw"));
+      if (d && (d->cw > 0 || d->ch > 0)) return QSize (qMax (d->cw, 1), qMax (d->ch, 1));
+    }
+    if (auto fn = GTK_WIDGET_GET_CLASS (w)->size_request) {
+      GtkRequisition r = { 0, 0 };
+      fn (w, &r);
+      w->requisition = r;
+      return QSize (r.width, r.height);
+    }
     return QSize (0, 0);
   }
+  QSize minimumSizeHint () const override
+  {
+    GtkWidget *w = gtkqt_from_qobject (const_cast<GtkQtDrawingWidget *> (this));
+    return w && !GTK_IS_DRAWING_AREA (w) ? sizeHint () : QSize (0, 0);
+  }
+
+  void ensure_backing ()
+  {
+    qreal dpr = devicePixelRatioF ();
+    QSize want = size () * dpr;
+    if (want.isEmpty ()) want = QSize (1, 1);
+    if (backing.size () == want && surface) return;
+    QImage n (want, QImage::Format_ARGB32_Premultiplied);
+    n.setDevicePixelRatio (dpr);
+    n.fill (background ());
+    if (!backing.isNull ()) { QPainter p (&n); p.drawImage (0, 0, backing); }
+    backing = n;
+    if (surface) cairo_surface_destroy (surface);
+    surface = cairo_image_surface_create_for_data (backing.bits (), CAIRO_FORMAT_ARGB32, backing.width (), backing.height (),
+                                                   backing.bytesPerLine ());
+    cairo_surface_set_device_scale (surface, dpr, dpr);
+  }
+
+  QColor background () const
+  {
+    GtkWidget *w = gtkqt_from_qobject (const_cast<GtkQtDrawingWidget *> (this));
+    GdkWindow *win = w ? w->window : nullptr;
+    if (win && win->has_background)
+      return QColor (win->background.red >> 8, win->background.green >> 8, win->background.blue >> 8);
+    return palette ().color (QPalette::Window);
+  }
+
+  /* drawing outside an expose handler: show it once the program is done */
+  cairo_surface_t *surface_for_drawing ()
+  {
+    ensure_backing ();
+    if (!painting && !flush_pending) {
+      flush_pending = true;
+      QPointer<GtkQtDrawingWidget> self (this);
+      QTimer::singleShot (0, this, [self] {
+        if (!self) return;
+        self->flush_pending = false;
+        self->blit_only = true;
+        self->repaint ();
+        self->blit_only = false;
+      });
+    }
+    return surface;
+  }
+
 protected:
   void paintEvent (QPaintEvent *e) override
   {
     GtkWidget *w = gtkqt_from_qobject (this);
     if (!w || w->priv->destroyed) return;
-    qreal dpr = devicePixelRatioF ();
-    QImage img (size () * dpr, QImage::Format_ARGB32_Premultiplied);
-    img.setDevicePixelRatio (dpr);
-    img.fill (palette ().color (QPalette::Window));
-    cairo_surface_t *s = cairo_image_surface_create_for_data (img.bits (), CAIRO_FORMAT_ARGB32, img.width (), img.height (),
-                                                              img.bytesPerLine ());
-    cairo_surface_set_device_scale (s, dpr, dpr);
-    w->priv->paint_surface = s;
-    {
-      GtkQtEmitGuard guard;
-      g_object_ref (w);
-      DrawData *d = draw_data (w);
-      if (d->func) {
-        cairo_t *cr = cairo_create (s);
-        d->func (GTK_DRAWING_AREA (w), cr, width (), height (), d->data);
-        cairo_destroy (cr);
+    ensure_backing ();
+    if (!blit_only) {
+      /* clear the exposed area to the window background, as X does */
+      {
+        QPainter bp (&backing);
+        GdkWindow *win = w->window;
+        if (win && win->back_pixmap && win->back_pixmap->surface) {
+          cairo_surface_t *bs = win->back_pixmap->surface;
+          QImage bi (cairo_image_surface_get_data (bs), cairo_image_surface_get_width (bs), cairo_image_surface_get_height (bs),
+                     cairo_image_surface_get_stride (bs), QImage::Format_RGB32);
+          bp.setClipRegion (e->region ());
+          bp.drawTiledPixmap (rect (), QPixmap::fromImage (bi));
+        } else {
+          bp.setCompositionMode (QPainter::CompositionMode_Source);
+          for (const QRect &r : e->region ()) bp.fillRect (r, background ());
+        }
       }
-      if (!w->priv->destroyed) {
-        cairo_t *cr = cairo_create (s);
-        gboolean handled = FALSE;
-        g_signal_emit_by_name (w, "draw", cr, &handled);
-        cairo_destroy (cr);
+      cairo_surface_mark_dirty (surface);
+      w->priv->paint_surface = surface;
+      painting = true;
+      {
+        GtkQtEmitGuard guard;
+        g_object_ref (w);
+        if (GTK_IS_DRAWING_AREA (w)) {
+          DrawData *d = draw_data (w);
+          if (d->func) {
+            cairo_t *cr = cairo_create (surface);
+                        d->func (GTK_DRAWING_AREA (w), cr, width (), height (), d->data);
+            cairo_destroy (cr);
+          }
+        }
+        if (!w->priv->destroyed) {
+          cairo_t *cr = cairo_create (surface);
+          for (const QRect &r : e->region ()) cairo_rectangle (cr, r.x (), r.y (), r.width (), r.height ());
+          cairo_clip (cr);
+          gboolean handled = FALSE;
+          g_signal_emit_by_name (w, "draw", cr, &handled);
+          cairo_destroy (cr);
+        }
+        if (!w->priv->destroyed) {
+          GdkEvent ev = {};
+          ev.expose.type = GDK_EXPOSE;
+          ev.expose.window = w->window;
+          ev.expose.area = { e->rect ().x (), e->rect ().y (), e->rect ().width (), e->rect ().height () };
+          gtkqt_emit_event (w, &ev, "expose-event");
+        }
+        g_object_unref (w);
       }
-      if (!w->priv->destroyed) {
-        GdkEvent ev = {};
-        ev.expose.type = GDK_EXPOSE;
-        ev.expose.window = w->window;
-        ev.expose.area = { e->rect ().x (), e->rect ().y (), e->rect ().width (), e->rect ().height () };
-        gtkqt_emit_event (w, &ev, "expose-event");
-      }
-      g_object_unref (w);
+      painting = false;
+      if (w->priv) w->priv->paint_surface = nullptr;
     }
-    if (w->priv) w->priv->paint_surface = nullptr;
-    cairo_surface_flush (s);
-    cairo_surface_destroy (s);
+    cairo_surface_flush (surface);
     QPainter p (this);
-    p.drawImage (0, 0, img);
+    p.drawImage (0, 0, backing);
   }
   void resizeEvent (QResizeEvent *e) override
   {
     QWidget::resizeEvent (e);
-    if (GtkWidget *w = gtkqt_from_qobject (this)) {
+    ensure_backing ();
+    if (GtkWidget *w = gtkqt_from_qobject (this); w && GTK_IS_DRAWING_AREA (w)) {
       GtkQtEmitGuard guard;
       g_signal_emit_by_name (w, "resize", width (), height ());
     }
   }
 };
 
+QObject *gtkqt_canvas_create (GtkWidget *)
+{
+  auto *d = new GtkQtDrawingWidget;
+  d->setAttribute (Qt::WA_OpaquePaintEvent);
+  return d;
+}
+
+cairo_surface_t *gtkqt_canvas_surface (GtkWidget *w)
+{
+  auto *c = dynamic_cast<GtkQtDrawingWidget *> (gtkqt_qw (w));
+  return c ? c->surface_for_drawing () : nullptr;
+}
+
 static QObject *drawing_create (GtkWidget *)
 {
   auto *d = new GtkQtDrawingWidget;
+  d->setAttribute (Qt::WA_OpaquePaintEvent);
   d->setSizePolicy (QSizePolicy::Expanding, QSizePolicy::Expanding);
   return d;
 }

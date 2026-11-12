@@ -1,0 +1,24 @@
+#!/bin/sh
+# glib-config for GTK 1.2 era programs: GLib 2 (the GLib 1.2 API is a
+# subset of it, plus gtkqt-glib1.h for the few calls GLib 2 dropped).
+pcdir="@GTKQT_CONFIG_PCDIR@"
+pc="env PKG_CONFIG_PATH=$pcdir${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH} pkg-config"
+mods="glib-2.0"
+out=""
+[ $# -eq 0 ] && { echo "usage: glib-config [--version] [--libs] [--cflags] [gmodule] [gthread]" >&2; exit 1; }
+for a in "$@"; do
+  case $a in
+    gthread) mods="$mods gthread-2.0" ;;
+    gmodule) mods="$mods gmodule-2.0" ;;
+  esac
+done
+for a in "$@"; do
+  case $a in
+    --version) $pc --modversion glib-2.0 ;;
+    --prefix|--exec-prefix) $pc --variable=prefix glib-2.0 ;;
+    --cflags) out="$out $($pc --cflags $mods) -include $($pc --variable=includedir gtk+)/gtkqt-glib1.h" ;;
+    --libs) out="$out $($pc --libs $mods)" ;;
+  esac
+done
+[ -n "$out" ] && echo $out
+exit 0

@@ -33,6 +33,7 @@
 #include <gtk/gtkqt-application.h>
 #include <gtk/gtkqt-gtk2.h>
 #include <gtk/gtkqt-print.h>
+#include <gtk/gtkqt-gtk1.h>
 #include <gtk/gtkqt-compat.h>
 
 #endif

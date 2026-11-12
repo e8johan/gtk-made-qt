@@ -27,6 +27,8 @@ static void drawable_finalize (GObject *o)
   auto *d = (GdkWindow *) o;
   if (d->kind == GTKQT_DRAWABLE_PIXMAP && d->surface) cairo_surface_destroy (d->surface);
   d->surface = nullptr;
+  if (d->back_pixmap) g_object_unref (d->back_pixmap);
+  d->back_pixmap = nullptr;
   G_OBJECT_CLASS (gdk_drawable_parent_class)->finalize (o);
 }
 static void gdk_drawable_class_init (GdkDrawableClass *klass) { G_OBJECT_CLASS (klass)->finalize = drawable_finalize; }
@@ -44,7 +46,10 @@ cairo_surface_t *gtkqt_drawable_target (GdkDrawable *d)
 {
   if (!d) return nullptr;
   if (d->surface) return d->surface;
-  if (d->kind == GTKQT_DRAWABLE_WINDOW && d->widget && d->widget->priv) return d->widget->priv->paint_surface;
+  if (d->kind == GTKQT_DRAWABLE_WINDOW && d->widget && d->widget->priv && !d->widget->priv->destroyed) {
+    if (d->widget->priv->paint_surface) return d->widget->priv->paint_surface;
+    return gtkqt_canvas_surface (d->widget);   /* drawing outside expose: backing store */
+  }
   return nullptr;
 }
 
@@ -119,19 +124,50 @@ static QWidget *drawable_qwidget (GdkWindow *window)
   return window->widget ? gtkqt_qw (window->widget) : nullptr;
 }
 
-void gdk_window_clear (GdkWindow *window) { if (QWidget *qw = drawable_qwidget (window)) qw->update (); }
+/* clear to the background (colour or back pixmap) without an expose event */
 void gdk_window_clear_area (GdkWindow *window, gint x, gint y, gint width, gint height)
 {
-  if (QWidget *qw = drawable_qwidget (window)) qw->update (x, y, width ? width : qw->width (), height ? height : qw->height ());
+  cairo_surface_t *s = gtkqt_drawable_target (window);
+  if (!s) return;
+  int w, h;
+  gdk_drawable_get_size (window, &w, &h);
+  if (width <= 0) width = w - x;
+  if (height <= 0) height = h - y;
+  cairo_t *cr = cairo_create (s);
+  cairo_rectangle (cr, x, y, width, height);
+  if (window->back_pixmap && window->back_pixmap->surface) {
+    cairo_set_source_surface (cr, window->back_pixmap->surface, 0, 0);
+    cairo_pattern_set_extend (cairo_get_source (cr), CAIRO_EXTEND_REPEAT);
+  } else if (window->has_background) {
+    gdk_cairo_set_source_color (cr, &window->background);
+  } else {
+    QWidget *qw = drawable_qwidget (window);
+    QColor c = qw ? qw->palette ().color (QPalette::Window) : QColor (Qt::white);
+    cairo_set_source_rgb (cr, c.redF (), c.greenF (), c.blueF ());
+  }
+  cairo_set_operator (cr, CAIRO_OPERATOR_SOURCE);
+  cairo_fill (cr);
+  cairo_destroy (cr);
 }
-void gdk_window_clear_area_e (GdkWindow *window, gint x, gint y, gint width, gint height) { gdk_window_clear_area (window, x, y, width, height); }
+void gdk_window_clear (GdkWindow *window) { gdk_window_clear_area (window, 0, 0, 0, 0); }
+/* ... with an expose event */
+void gdk_window_clear_area_e (GdkWindow *window, gint x, gint y, gint width, gint height)
+{
+  if (QWidget *qw = drawable_qwidget (window)) qw->update (x, y, width > 0 ? width : qw->width (), height > 0 ? height : qw->height ());
+}
 void gdk_window_set_background (GdkWindow *window, const GdkColor *color)
 {
   if (!window || !color) return;
   window->background = *color;
   window->has_background = true;
 }
-void gdk_window_set_back_pixmap (GdkWindow *, GdkPixmap *, gboolean) {}
+void gdk_window_set_back_pixmap (GdkWindow *window, GdkPixmap *pixmap, gboolean)
+{
+  if (!window) return;
+  if (pixmap) g_object_ref (pixmap);
+  if (window->back_pixmap) g_object_unref (window->back_pixmap);
+  window->back_pixmap = pixmap;
+}
 void gdk_window_process_updates (GdkWindow *window, gboolean) { if (QWidget *qw = drawable_qwidget (window)) qw->repaint (); }
 void gdk_window_process_all_updates (void) { QCoreApplication::processEvents (QEventLoop::ExcludeUserInputEvents); }
 void gdk_window_raise (GdkWindow *window) { if (QWidget *qw = drawable_qwidget (window)) qw->window ()->raise (); }
@@ -525,10 +561,9 @@ gchar *gdk_atom_name (GdkAtom atom)
 /* ======================================================================
  * Colormaps and visuals (TrueColor)
  * ====================================================================== */
-struct _GdkColormap { int dummy; };
-struct _GdkVisual { int dummy; };
-static GdkColormap system_colormap;
-static GdkVisual system_visual;
+static GdkVisual system_visual = { GDK_VISUAL_TRUE_COLOR, 24, G_BYTE_ORDER == G_LITTLE_ENDIAN ? GDK_LSB_FIRST : GDK_MSB_FIRST,
+                                   256, 8, 0xff0000, 16, 8, 0x00ff00, 8, 8, 0x0000ff, 0, 8 };
+static GdkColormap system_colormap = { 0, nullptr };
 
 GdkColormap *gdk_colormap_get_system (void) { return &system_colormap; }
 GdkVisual *gdk_visual_get_system (void) { return &system_visual; }

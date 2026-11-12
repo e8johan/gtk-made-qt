@@ -14,12 +14,15 @@
 #define GTKQT_API_VERSION 3
 #endif
 
-#if GTKQT_API_VERSION != 2 && GTKQT_API_VERSION != 3 && GTKQT_API_VERSION != 4
-#error "GTKQT_API_VERSION must be 2, 3 or 4"
+#if GTKQT_API_VERSION < 1 || GTKQT_API_VERSION > 4
+#error "GTKQT_API_VERSION must be 1, 2, 3 or 4"
 #endif
 
 #define GTK_MAJOR_VERSION GTKQT_API_VERSION
-#if GTKQT_API_VERSION == 2
+#if GTKQT_API_VERSION == 1
+#define GTK_MINOR_VERSION 2
+#define GTK_MICRO_VERSION 10
+#elif GTKQT_API_VERSION == 2
 #define GTK_MINOR_VERSION 24
 #define GTK_MICRO_VERSION 33
 #elif GTKQT_API_VERSION == 3
@@ -34,6 +37,14 @@
   (GTK_MAJOR_VERSION > (major) || \
    (GTK_MAJOR_VERSION == (major) && GTK_MINOR_VERSION > (minor)) || \
    (GTK_MAJOR_VERSION == (major) && GTK_MINOR_VERSION == (minor) && GTK_MICRO_VERSION >= (micro)))
+
+/* GTK's version variables, as seen by the program's API level (configure
+ * scripts compare them with gtk-config / pkg-config) */
+#define gtk_major_version ((guint) GTK_MAJOR_VERSION)
+#define gtk_minor_version ((guint) GTK_MINOR_VERSION)
+#define gtk_micro_version ((guint) GTK_MICRO_VERSION)
+#define gtk_binary_age    ((guint) 0)
+#define gtk_interface_age ((guint) 0)
 
 /* True when compiling against this shim instead of real GTK. */
 #define GTK_MADE_QT 1

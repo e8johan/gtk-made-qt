@@ -63,7 +63,6 @@ typedef GSourceFunc GtkFunction;
 #define gtk_timeout_remove(id)                      g_source_remove (id)
 #define gtk_idle_add(f, d)                          g_idle_add ((f), (d))
 #define gtk_idle_remove(id)                         g_source_remove (id)
-#define gtk_exit(code)                              exit (code)
 #define gtk_toggle_button_set_state                 gtk_toggle_button_set_active
 #define gtk_menu_item_right_justify(item)           gtk_menu_item_set_right_justified ((item), TRUE)
 /* GTK 2 returned GtkObject* here; a gpointer is assignable to either. */

@@ -495,6 +495,7 @@ GtkWidget *gtk_spin_button_new (GtkAdjustment *adjustment, gdouble, guint digits
 {
   GtkWidget *w = (GtkWidget *) g_object_new (GTK_TYPE_SPIN_BUTTON, nullptr);
   range_data (w)->digits = digits;
+  GTK_SPIN_BUTTON (w)->digits = digits;
   gtk_spin_button_set_adjustment (GTK_SPIN_BUTTON (w), adjustment ? adjustment : gtk_adjustment_new (0, 0, 0, 0, 0, 0));
   return w;
 }
@@ -509,6 +510,7 @@ GtkWidget *gtk_spin_button_new_with_range (gdouble min, gdouble max, gdouble ste
 void gtk_spin_button_set_adjustment (GtkSpinButton *spin, GtkAdjustment *adjustment)
 {
   RangeData *d = range_data (GTK_WIDGET (spin));
+  spin->adjustment = adjustment;
   if (d->adj == adjustment) return;
   if (d->adj) {
     g_signal_handler_disconnect (d->adj, d->h_changed);
@@ -527,6 +529,7 @@ GtkAdjustment *gtk_spin_button_get_adjustment (GtkSpinButton *spin) { return ran
 
 void gtk_spin_button_set_digits (GtkSpinButton *spin, guint digits)
 {
+  spin->digits = digits;
   range_data (GTK_WIDGET (spin))->digits = digits;
   spin_sync (GTK_WIDGET (spin));
 }

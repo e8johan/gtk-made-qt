@@ -34,6 +34,8 @@ set(GTKQT_SOURCES
     src/gtk2.cpp
     src/print.cpp
     src/script.cpp
+    src/gtk1.cpp
+    src/gtk1widgets.cpp
 )
 
 # GtkBuilder's table of the library's own GType functions
@@ -67,7 +69,7 @@ set_target_properties(gtk-made-qt PROPERTIES
 # configure scripts at them.
 set(GTKQT_INSTALL_LIBDIR ${CMAKE_INSTALL_FULL_LIBDIR}/gtk-made-qt)
 set(GTKQT_INSTALL_INCLUDEDIR ${CMAKE_INSTALL_FULL_INCLUDEDIR}/gtk-made-qt)
-set(GTKQT_LINK_NAMES gtk-x11-2.0 gdk-x11-2.0 gtk-3 gdk-3 gtk-4)
+set(GTKQT_LINK_NAMES gtk gdk gtk-x11-2.0 gdk-x11-2.0 gtk-3 gdk-3 gtk-4)
 function(gtkqt_link_script file archive qtlibs)
     file(GENERATE OUTPUT ${file} CONTENT
 "/* GNU ld script: GTK made Qt (the GTK API on Qt). */
@@ -85,6 +87,7 @@ endforeach()
 
 # pkg-config files: name|api|version|library
 set(GTKQT_PC_FILES
+    "gtk+|1|1.2.10|gtk" "gdk|1|1.2.10|gdk"
     "gtk+-2.0|2|2.24.33|gtk-x11-2.0" "gtk+-x11-2.0|2|2.24.33|gtk-x11-2.0" "gdk-2.0|2|2.24.33|gdk-x11-2.0" "gdk-x11-2.0|2|2.24.33|gdk-x11-2.0"
     "gtk+-3.0|3|3.24.41|gtk-3" "gtk+-x11-3.0|3|3.24.41|gtk-3" "gdk-3.0|3|3.24.41|gdk-3" "gdk-x11-3.0|3|3.24.41|gdk-3"
     "gtk4|4|4.14.0|gtk-4" "gtk4-x11|4|4.14.0|gtk-4")
@@ -107,6 +110,16 @@ foreach(pc ${GTKQT_PC_FILES})
     string(REPLACE "|" ";" f "${pc}")
     list(GET f 0 PCNAME)
     file(CREATE_LINK ${CMAKE_CURRENT_BINARY_DIR}/lib/pkgconfig/${PCNAME}.pc ${CMAKE_CURRENT_BINARY_DIR}/pkgconfig/${PCNAME}.pc SYMBOLIC)
+endforeach()
+
+# GTK 1.2 programs ask gtk-config / glib-config instead of pkg-config
+foreach(script gtk-config glib-config)
+    set(GTKQT_CONFIG_PCDIR ${CMAKE_CURRENT_BINARY_DIR}/lib/pkgconfig)
+    configure_file(tools/${script}.in ${CMAKE_CURRENT_BINARY_DIR}/lib/bin/${script} @ONLY
+        FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+    set(GTKQT_CONFIG_PCDIR ${GTKQT_INSTALL_LIBDIR}/pkgconfig)
+    configure_file(tools/${script}.in ${GTKQT_STAGE}/bin/${script} @ONLY)
+    install(PROGRAMS ${GTKQT_STAGE}/bin/${script} DESTINATION ${GTKQT_INSTALL_LIBDIR}/bin)
 endforeach()
 
 set(GTKQT_ENV_LIBDIR ${GTKQT_INSTALL_LIBDIR})

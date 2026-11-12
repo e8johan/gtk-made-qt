@@ -112,7 +112,8 @@ GtkWidget *gtk_hscrollbar_new (GtkAdjustment *adjustment);
 GtkWidget *gtk_vscrollbar_new (GtkAdjustment *adjustment);
 
 /* GtkSpinButton */
-GTKQT_SIMPLE_TYPE (GtkSpinButton, GtkEntry)
+typedef struct _GtkSpinButton { GtkEntry parent_instance; GtkAdjustment *adjustment; guint digits; gfloat climb_rate; } GtkSpinButton;
+typedef struct _GtkSpinButtonClass { GtkEntryClass parent_class; } GtkSpinButtonClass;
 #define GTK_TYPE_SPIN_BUTTON (gtk_spin_button_get_type ())
 #define GTK_SPIN_BUTTON(o)   (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_SPIN_BUTTON, GtkSpinButton))
 #define GTK_IS_SPIN_BUTTON(o) (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_SPIN_BUTTON))
@@ -133,7 +134,15 @@ void       gtk_spin_button_set_update_policy (GtkSpinButton *spin_button, GtkSpi
 void       gtk_spin_button_update (GtkSpinButton *spin_button);
 
 /* GtkProgressBar */
-GTKQT_SIMPLE_TYPE (GtkProgressBar, GtkWidget)
+typedef struct _GtkProgressBar {
+  GtkWidget parent_instance;
+  /* GTK 1 GtkProgress fields */
+  GtkAdjustment *adjustment;
+  gchar *format;
+  gfloat x_align, y_align;
+  guint show_text : 1, activity_mode : 1;
+} GtkProgressBar;
+typedef struct _GtkProgressBarClass { GtkWidgetClass parent_class; } GtkProgressBarClass;
 #define GTK_TYPE_PROGRESS_BAR (gtk_progress_bar_get_type ())
 #define GTK_PROGRESS_BAR(o)   (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_PROGRESS_BAR, GtkProgressBar))
 #define GTK_IS_PROGRESS_BAR(o) (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_PROGRESS_BAR))
