@@ -79,8 +79,7 @@ typedef enum { GTK_TREE_VIEW_COLUMN_GROW_ONLY, GTK_TREE_VIEW_COLUMN_AUTOSIZE, GT
 typedef enum { GTK_TREE_MODEL_ITERS_PERSIST = 1 << 0, GTK_TREE_MODEL_LIST_ONLY = 1 << 1 } GtkTreeModelFlags;
 
 /* Pango enums that leak into the GTK API */
-typedef enum { PANGO_ELLIPSIZE_NONE, PANGO_ELLIPSIZE_START, PANGO_ELLIPSIZE_MIDDLE, PANGO_ELLIPSIZE_END } PangoEllipsizeMode;
-typedef enum { PANGO_WRAP_WORD, PANGO_WRAP_CHAR, PANGO_WRAP_WORD_CHAR } PangoWrapMode;
+#include <pango/pango.h>
 
 /* GTK 2 widget flags (GTK_WIDGET_SET_FLAGS etc.) */
 typedef enum {
@@ -130,8 +129,6 @@ GType gtk_icon_size_get_type (void) G_GNUC_CONST;
 #define GTK_TYPE_ICON_SIZE (gtk_icon_size_get_type ())
 GType gtk_file_chooser_action_get_type (void) G_GNUC_CONST;
 #define GTK_TYPE_FILE_CHOOSER_ACTION (gtk_file_chooser_action_get_type ())
-GType pango_ellipsize_mode_get_type (void) G_GNUC_CONST;
-#define PANGO_TYPE_ELLIPSIZE_MODE (pango_ellipsize_mode_get_type ())
 
 G_END_DECLS
 

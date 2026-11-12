@@ -4,6 +4,6 @@ libdir=@PC_LIBDIR@
 Name: GTK made Qt (GTK @GTKQT_API@ API)
 Description: The GTK @GTKQT_API@ C API implemented on top of Qt
 Version: @GTK_FAKE_VERSION@
-Requires: glib-2.0 gobject-2.0 gio-2.0 gmodule-export-2.0 cairo
-Libs: -L${libdir} -lgtk-made-qt @PC_EXTRA_LIBS@
+Requires: glib-2.0 gobject-2.0 gio-2.0 gmodule-export-2.0 cairo pango pangocairo
+Libs: -L${libdir} -l@PC_LIBNAME@
 Cflags: -I${includedir} -DGTKQT_API_VERSION=@GTKQT_API@

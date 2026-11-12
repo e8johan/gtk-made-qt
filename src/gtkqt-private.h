@@ -27,6 +27,8 @@
 #include <QMap>
 #include <QIcon>
 #include <QAction>
+#include <QHash>
+#include <QFont>
 #include <QEvent>
 
 #include <functional>
@@ -179,6 +181,29 @@ GActionGroup *gtkqt_find_action_group (GtkWidget *widget, const QByteArray &pref
 QMenu *gtkqt_menu_from_model (GMenuModel *model, GtkWidget *context, QWidget *parent);
 void   gtkqt_menubar_fill_from_model (QWidget *menubar, GMenuModel *model, GtkWidget *context);
 QStringList gtkqt_application_accels (GtkApplication *app, const QString &detailed_action);
+
+/* ---------- GDK drawables (widget windows, text view border windows, pixmaps) ---------- */
+enum GtkQtDrawableKind { GTKQT_DRAWABLE_WINDOW, GTKQT_DRAWABLE_TEXT_BORDER, GTKQT_DRAWABLE_PIXMAP, GTKQT_DRAWABLE_ROOT };
+struct _GdkWindow {
+  GObject parent_instance;
+  GtkWidget *widget;              /* the owning widget (windows) */
+  int kind;                       /* GtkQtDrawableKind */
+  int text_window_type;           /* GtkTextWindowType for border windows */
+  QWidget *qw;                    /* the QWidget showing it, when not the widget's own */
+  cairo_surface_t *surface;       /* pixmap contents, or the surface being painted right now */
+  int width, height, depth;       /* pixmaps */
+  GdkColor background;
+  bool has_background;
+};
+GdkWindow *gtkqt_drawable_new (int kind, GtkWidget *widget);
+cairo_surface_t *gtkqt_drawable_target (GdkDrawable *d);   /* nullptr when it cannot be drawn on now */
+GtkStyle  *gtkqt_default_style_ref (void);
+QFont      gtkqt_font_from_pango (const PangoFontDescription *desc);
+PangoFontDescription *gtkqt_pango_from_font (const QFont &font);
+extern QHash<QString, QByteArray> gtkqt_user_stock_labels;
+extern QHash<QString, QIcon> gtkqt_user_icons;
+void       gtkqt_accel_group_detach (GtkAccelGroup *group, QWidget *window);
+QObject   *gtkqt_file_dialog_create (GtkWidget *w);
 
 /* ---------- misc ---------- */
 GdkWindow *gtkqt_gdk_window (GtkWidget *widget);

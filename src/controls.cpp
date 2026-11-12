@@ -887,11 +887,89 @@ static QLineEdit *editable_line (GtkEditable *e)
 
 static QObject *s_adopt = nullptr;   /* lets a GtkEntry wrap an existing QLineEdit */
 
+/* A QLineEdit whose typing, deleting, cutting and pasting go through the
+ * GtkEditable signals "insert-text" and "delete-text", so handlers can
+ * filter or veto the change as in GTK. */
+class GtkQtLineEdit : public QLineEdit {
+public:
+  GtkWidget *gw;
+  explicit GtkQtLineEdit (GtkWidget *w) : gw (w) {}
+  bool alive () const { return gw && gw->priv && !gw->priv->destroyed; }
+  void delete_range (int start, int end)
+  {
+    if (start == end) return;
+    gtk_editable_delete_text (GTK_EDITABLE (gw), qMin (start, end), qMax (start, end));
+  }
+  void replace_selection (const QString &text)
+  {
+    if (isReadOnly ()) return;
+    g_object_ref (gw);
+    if (hasSelectedText ()) delete_range (selectionStart (), selectionStart () + selectedText ().size ());
+    if (alive () && !text.isEmpty ()) {
+      QByteArray u = text.toUtf8 ();
+      gint pos = cursorPosition ();
+      gtk_editable_insert_text (GTK_EDITABLE (gw), u.constData (), u.size (), &pos);
+      if (alive ()) setCursorPosition (pos);
+    }
+    g_object_unref (gw);
+  }
+protected:
+  void keyPressEvent (QKeyEvent *e) override
+  {
+    if (!alive () || isReadOnly ()) { QLineEdit::keyPressEvent (e); return; }
+    Qt::KeyboardModifiers m = e->modifiers () & ~Qt::KeypadModifier;
+    if (e->matches (QKeySequence::Paste)) {
+      QString t = QGuiApplication::clipboard ()->text ();
+      t.replace ('\n', ' ').remove ('\r');
+      replace_selection (t);
+      return;
+    }
+    if (e->matches (QKeySequence::Cut)) {
+      if (hasSelectedText ()) {
+        QGuiApplication::clipboard ()->setText (selectedText ());
+        replace_selection (QString ());
+      }
+      return;
+    }
+    if ((e->key () == Qt::Key_Backspace || e->key () == Qt::Key_Delete) && !(m & ~Qt::ControlModifier)) {
+      if (hasSelectedText ()) { replace_selection (QString ()); return; }
+      int pos = cursorPosition (), other = pos;
+      QString t = text ();
+      bool fwd = e->key () == Qt::Key_Delete;
+      if (m & Qt::ControlModifier) {
+        int saved = pos;
+        if (fwd) cursorWordForward (false); else cursorWordBackward (false);
+        other = cursorPosition ();
+        setCursorPosition (saved);
+      } else {
+        other = fwd ? qMin (pos + 1, (int) t.size ()) : qMax (pos - 1, 0);
+      }
+      delete_range (pos, other);
+      return;
+    }
+    QString t = e->text ();
+    if (!t.isEmpty () && t.at (0).isPrint () && !(m & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))) {
+      replace_selection (t);
+      return;
+    }
+    QLineEdit::keyPressEvent (e);
+  }
+  void inputMethodEvent (QInputMethodEvent *e) override
+  {
+    if (alive () && !e->commitString ().isEmpty () && e->preeditString ().isEmpty () && e->replacementLength () == 0) {
+      replace_selection (e->commitString ());
+      e->accept ();
+      return;
+    }
+    QLineEdit::inputMethodEvent (e);
+  }
+};
+
 static QObject *entry_create (GtkWidget *w)
 {
   QLineEdit *e;
   if (s_adopt) { e = qobject_cast<QLineEdit *> (s_adopt); s_adopt = nullptr; g_object_set_data (G_OBJECT (w), "gtkqt-borrowed", GINT_TO_POINTER (1)); }
-  else e = new QLineEdit;
+  else e = new GtkQtLineEdit (w);
   gtkqt_connect (w, e, &QLineEdit::textChanged, [] (GtkWidget *ew, const QString &) {
     g_signal_emit_by_name (ew, "changed");
     g_object_notify (G_OBJECT (ew), "text");
@@ -917,6 +995,35 @@ static void entry_dispose (GObject *o)
   G_OBJECT_CLASS (gtk_entry_parent_class)->dispose (o);
 }
 static void gtk_entry_init (GtkEntry *) {}
+
+static void entry_real_insert_text (GtkEditable *editable, const gchar *new_text, gint len, gint *position)
+{
+  QLineEdit *l = editable_line (editable);
+  if (!l) return;
+  QString ins = len < 0 ? gtkqt_str (new_text) : QString::fromUtf8 (new_text, len);
+  int pos = position ? *position : l->cursorPosition ();
+  if (pos < 0) pos = l->text ().size ();
+  pos = qBound (0, pos, (int) l->text ().size ());
+  QString t = l->text ();
+  if (l->maxLength () > 0 && t.size () + ins.size () > l->maxLength ()) ins.truncate (qMax (0, l->maxLength () - (int) t.size ()));
+  t.insert (pos, ins);
+  l->setText (t);
+  l->setCursorPosition (pos + ins.size ());
+  if (position) *position = pos + ins.size ();
+}
+
+static void entry_real_delete_text (GtkEditable *editable, gint start_pos, gint end_pos)
+{
+  QLineEdit *l = editable_line (editable);
+  if (!l) return;
+  QString t = l->text ();
+  if (end_pos < 0 || end_pos > t.size ()) end_pos = t.size ();
+  if (start_pos >= end_pos) return;
+  t.remove (start_pos, end_pos - start_pos);
+  l->setText (t);
+  l->setCursorPosition (start_pos);
+}
+
 static void gtk_entry_class_init (GtkEntryClass *klass)
 {
   G_OBJECT_CLASS (klass)->dispose = entry_dispose;
@@ -925,6 +1032,11 @@ static void gtk_entry_class_init (GtkEntryClass *klass)
   g_signal_new ("changed", t, G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
   g_signal_new ("activate", t, (GSignalFlags) (G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION), 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
   g_signal_new ("icon-press", t, G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 2, G_TYPE_INT, G_TYPE_POINTER);
+  /* GtkEditable: the default handlers make the change */
+  g_signal_new_class_handler ("insert-text", t, G_SIGNAL_RUN_LAST, G_CALLBACK (entry_real_insert_text), nullptr, nullptr, nullptr,
+                              G_TYPE_NONE, 3, G_TYPE_STRING, G_TYPE_INT, G_TYPE_POINTER);
+  g_signal_new_class_handler ("delete-text", t, G_SIGNAL_RUN_LAST, G_CALLBACK (entry_real_delete_text), nullptr, nullptr, nullptr,
+                              G_TYPE_NONE, 2, G_TYPE_INT, G_TYPE_INT);
   gtkqt_prop (klass, g_param_spec_string ("text", nullptr, nullptr, "", RW),
               [] (GObject *o, const GValue *v) { gtk_entry_set_text (GTK_ENTRY (o), g_value_get_string (v)); },
               [] (GObject *o, GValue *v) { g_value_set_string (v, gtk_entry_get_text (GTK_ENTRY (o))); });
@@ -1060,7 +1172,13 @@ const char *gtk_editable_get_text (GtkEditable *editable)
 
 void gtk_editable_set_text (GtkEditable *editable, const char *text)
 {
-  if (QLineEdit *l = editable_line (editable)) l->setText (gtkqt_str (text));
+  QLineEdit *l = editable_line (editable);
+  if (!l) return;
+  if (l->text () == gtkqt_str (text)) return;
+  if (!g_signal_lookup ("insert-text", G_OBJECT_TYPE (editable))) { l->setText (gtkqt_str (text)); return; }
+  gtk_editable_delete_text (editable, 0, -1);
+  gint pos = 0;
+  if (text && *text) gtk_editable_insert_text (editable, text, -1, &pos);
 }
 
 gchar *gtk_editable_get_chars (GtkEditable *editable, gint start_pos, gint end_pos)
@@ -1073,24 +1191,29 @@ gchar *gtk_editable_get_chars (GtkEditable *editable, gint start_pos, gint end_p
 
 void gtk_editable_insert_text (GtkEditable *editable, const gchar *new_text, gint len, gint *position)
 {
-  QLineEdit *l = editable_line (editable);
-  if (!l) return;
-  QString ins = len < 0 ? gtkqt_str (new_text) : QString::fromUtf8 (new_text, len);
-  int pos = position ? *position : l->cursorPosition ();
-  QString t = l->text ();
-  t.insert (qBound (0, pos, (int) t.size ()), ins);
-  l->setText (t);
-  if (position) *position = pos + ins.size ();
+  if (!new_text) return;
+  if (len < 0) len = strlen (new_text);
+  if (len == 0) return;
+  gint pos = position ? *position : -1;
+  if (g_signal_lookup ("insert-text", G_OBJECT_TYPE (editable))) {
+    QByteArray copy (new_text, len);   /* the signal takes a NUL-terminated copy */
+    g_signal_emit_by_name (editable, "insert-text", copy.constData (), len, &pos);
+  } else {
+    entry_real_insert_text (editable, new_text, len, &pos);
+  }
+  if (position) *position = pos;
 }
 
 void gtk_editable_delete_text (GtkEditable *editable, gint start_pos, gint end_pos)
 {
   QLineEdit *l = editable_line (editable);
   if (!l) return;
-  QString t = l->text ();
-  if (end_pos < 0 || end_pos > t.size ()) end_pos = t.size ();
-  t.remove (start_pos, end_pos - start_pos);
-  l->setText (t);
+  int n = l->text ().size ();
+  if (end_pos < 0 || end_pos > n) end_pos = n;
+  if (start_pos < 0) start_pos = 0;
+  if (start_pos >= end_pos) return;
+  if (g_signal_lookup ("delete-text", G_OBJECT_TYPE (editable))) g_signal_emit_by_name (editable, "delete-text", start_pos, end_pos);
+  else entry_real_delete_text (editable, start_pos, end_pos);
 }
 
 void gtk_editable_select_region (GtkEditable *editable, gint start_pos, gint end_pos)
