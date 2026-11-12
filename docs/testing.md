@@ -53,6 +53,18 @@ Leafpad's charset widget), Options/Font, Help/About, File/Print with
 QT_QPA_PLATFORM=offscreen GTKQT_SCRIPT="wait 400; menu Options/Line Numbers; menu Search/Find...; type indented; accept; shot find.png; quit" src/leafpad README
 ```
 
+## GTK 1.2 tutorial programs
+
+The GTK 1.2 sources ship the tutorial programs (`examples/`). This builds
+each against the GTK 1.2 API level, runs it headless and saves a
+screenshot:
+
+```bash
+tools/build-gtk1-examples.sh ~/src/gtk+-1.2.10 /tmp/gtk1-shots
+```
+
+`packbox` needs an argument; `tree` uses GtkTree, which is not provided.
+
 ## Memory
 
 ```bash

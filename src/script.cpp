@@ -156,6 +156,10 @@ static void run_steps (QStringList steps)
         return;
       }
     } else if (cmd == "click" || cmd == "focus") {
+      /* the widget name may have spaces ("Add List"): it runs up to the first number */
+      QStringList name;
+      while (!a.isEmpty ()) { bool num = false; a.first ().toInt (&num); if (num && !name.isEmpty ()) break; name << a.takeFirst (); }
+      a.prepend (name.join (' '));
       QWidget *t = find_widget (a.value (0));
       if (!t) { fprintf (stderr, "script: no widget: %s\n", qPrintable (a.value (0))); continue; }
       if (cmd == "focus") { t->activateWindow (); t->setFocus (Qt::OtherFocusReason); }
