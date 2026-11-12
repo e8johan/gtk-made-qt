@@ -188,6 +188,22 @@ void gtkqt_window_before_show (GtkWidget *w)
   if (!qw || d->shown_once) return;
   d->shown_once = true;
   if (d->modal) qw->setWindowModality (Qt::ApplicationModal);
+  /* GTK focuses the first focusable widget in geometric order (top to
+   * bottom, then left to right), Qt the first one created: for dialogs
+   * built with their buttons first, that would be a button. */
+  QPointer<QWidget> guard (qw);
+  QTimer::singleShot (0, qw, [guard] {
+    if (!guard || guard->property ("gtkqt-focus-chosen").toBool ()) return;
+    QWidget *best = nullptr;
+    QPoint bp;
+    for (QWidget *c : guard->findChildren<QWidget *> ()) {
+      if (!c->isVisibleTo (guard) || !c->isEnabled () || !(c->focusPolicy () & Qt::TabFocus) || c->focusProxy ()) continue;
+      if (qobject_cast<QAbstractButton *> (c)) continue;   /* GTK 2 buttons do take focus, but are never first in practice */
+      QPoint p = c->mapTo (guard, QPoint (0, 0));
+      if (!best || p.y () < bp.y () || (p.y () == bp.y () && p.x () < bp.x ())) { best = c; bp = p; }
+    }
+    if (best) best->setFocus (Qt::TabFocusReason);
+  });
   qw->adjustSize ();
   QSize sz = qw->size ();
   if (d->default_w > 0 || d->default_h > 0) {
@@ -449,7 +465,30 @@ GtkApplication *gtk_window_get_application (GtkWindow *window) { return window_d
 
 void gtk_window_add_accel_group (GtkWindow *window, GtkAccelGroup *accel_group)
 {
-  if (accel_group) gtkqt_accel_group_attach (accel_group, gtkqt_qw (GTK_WIDGET (window)));
+  if (!accel_group) return;
+  gtkqt_accel_group_attach (accel_group, gtkqt_qw (GTK_WIDGET (window)));
+  auto *groups = (GSList *) g_object_steal_data (G_OBJECT (window), "gtkqt-accel-groups");
+  groups = g_slist_append (groups, g_object_ref (accel_group));
+  g_object_set_data_full (G_OBJECT (window), "gtkqt-accel-groups", groups,
+                          [] (gpointer l) { g_slist_free_full ((GSList *) l, g_object_unref); });
+}
+
+void gtk_window_remove_accel_group (GtkWindow *window, GtkAccelGroup *accel_group)
+{
+  if (!accel_group) return;
+  gtkqt_accel_group_detach (accel_group, gtkqt_qw (GTK_WIDGET (window)));
+  auto *groups = (GSList *) g_object_steal_data (G_OBJECT (window), "gtkqt-accel-groups");
+  if (g_slist_find (groups, accel_group)) {
+    groups = g_slist_remove (groups, accel_group);
+    g_object_unref (accel_group);
+  }
+  g_object_set_data_full (G_OBJECT (window), "gtkqt-accel-groups", groups,
+                          [] (gpointer l) { g_slist_free_full ((GSList *) l, g_object_unref); });
+}
+
+GSList *gtk_accel_groups_from_object (GObject *object)
+{
+  return (GSList *) g_object_get_data (object, "gtkqt-accel-groups");
 }
 
 GList *gtk_window_list_toplevels (void)

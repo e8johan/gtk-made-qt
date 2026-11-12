@@ -548,6 +548,12 @@ void gtk_spin_button_set_range (GtkSpinButton *spin, gdouble min, gdouble max)
 
 gdouble gtk_spin_button_get_value (GtkSpinButton *spin)
 {
+  /* text typed but not yet committed (no Return or focus change yet) */
+  if (auto *sb = gtkqt_inner<QAbstractSpinBox> (GTK_WIDGET (spin))) {
+    if (sb->hasAcceptableInput ()) sb->interpretText ();
+  } else if (auto *sb2 = qobject_cast<QAbstractSpinBox *> (gtkqt_qw (GTK_WIDGET (spin)))) {
+    if (sb2->hasAcceptableInput ()) sb2->interpretText ();
+  }
   GtkAdjustment *a = range_data (GTK_WIDGET (spin))->adj;
   return a ? a->value : 0;
 }

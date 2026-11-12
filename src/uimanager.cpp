@@ -36,8 +36,16 @@ void gtkqt_accel_group_attach (GtkAccelGroup *group, QWidget *window)
   for (const QPointer<QAction> &a : accel (group)->actions) if (a) window->addAction (a);
 }
 
+void gtkqt_accel_group_detach (GtkAccelGroup *group, QWidget *window)
+{
+  if (!window) return;
+  accel (group)->windows.removeAll (window);
+  for (const QPointer<QAction> &a : accel (group)->actions) if (a) window->removeAction (a);
+}
+
 void gtkqt_accel_group_add_action (GtkAccelGroup *group, QAction *action)
 {
+  if (accel (group)->actions.contains (action)) return;
   accel (group)->actions << action;
   for (const QPointer<QWidget> &w : accel (group)->windows) if (w) w->addAction (action);
 }

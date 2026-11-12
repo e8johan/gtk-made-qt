@@ -72,8 +72,6 @@ GTKQT_ENUM (gtk_stack_transition_type_get_type, "GtkStackTransitionType", EV (GT
             EV (GTK_STACK_TRANSITION_TYPE_SLIDE_DOWN, "slide-down"),
             EV (GTK_STACK_TRANSITION_TYPE_SLIDE_LEFT_RIGHT, "slide-left-right"),
             EV (GTK_STACK_TRANSITION_TYPE_SLIDE_UP_DOWN, "slide-up-down"))
-GTKQT_ENUM (pango_ellipsize_mode_get_type, "PangoEllipsizeMode", EV (PANGO_ELLIPSIZE_NONE, "none"),
-            EV (PANGO_ELLIPSIZE_START, "start"), EV (PANGO_ELLIPSIZE_MIDDLE, "middle"), EV (PANGO_ELLIPSIZE_END, "end"))
 GTKQT_ENUM (gtk_license_get_type, "GtkLicense", EV (GTK_LICENSE_UNKNOWN, "unknown"), EV (GTK_LICENSE_CUSTOM, "custom"),
             EV (GTK_LICENSE_GPL_2_0, "gpl-2-0"), EV (GTK_LICENSE_GPL_3_0, "gpl-3-0"), EV (GTK_LICENSE_LGPL_2_1, "lgpl-2-1"),
             EV (GTK_LICENSE_LGPL_3_0, "lgpl-3-0"), EV (GTK_LICENSE_BSD, "bsd"), EV (GTK_LICENSE_MIT_X11, "mit-x11"),
@@ -166,8 +164,11 @@ static gboolean autoquit_cb (gpointer)
   return G_SOURCE_REMOVE;
 }
 
+void gtkqt_script_start ();
+
 static void setup_app ()
 {
+  gtkqt_script_start ();
   qApp->setQuitOnLastWindowClosed (false);
   if (g_get_prgname ())
     QCoreApplication::setApplicationName (QString::fromUtf8 (g_get_prgname ()));
@@ -365,10 +366,51 @@ static const StockItem stock_items[] = {
   { "gtk-zoom-out", "Zoom _Out", "zoom-out" },
 };
 
+static const StockItem stock_items2[] = {
+  { "gtk-print-preview", "Print Pre_view", "document-print-preview" }, { "gtk-jump-to", "_Jump to", "go-jump" },
+  { "gtk-select-font", "_Font", "preferences-desktop-font" }, { "gtk-page-setup", "Page Set_up", "document-page-setup" },
+  { "gtk-revert-to-saved", "_Revert", "document-revert" }, { "gtk-goto-first", "_First", "go-first" },
+  { "gtk-goto-last", "_Last", "go-last" }, { "gtk-goto-top", "_Top", "go-top" }, { "gtk-goto-bottom", "_Bottom", "go-bottom" },
+  { "gtk-index", "_Index", "help-contents" }, { "gtk-indent", "Increase Indent", "format-indent-more" },
+  { "gtk-unindent", "Decrease Indent", "format-indent-less" }, { "gtk-convert", "_Convert", "view-refresh" },
+  { "gtk-spell-check", "_Spell Check", "tools-check-spelling" }, { "gtk-fullscreen", "_Fullscreen", "view-fullscreen" },
+  { "gtk-leave-fullscreen", "_Leave Fullscreen", "view-restore" }, { "gtk-media-play", "P_lay", "media-playback-start" },
+  { "gtk-media-pause", "P_ause", "media-playback-pause" }, { "gtk-media-stop", "_Stop", "media-playback-stop" },
+  { "gtk-media-next", "_Next", "media-skip-forward" }, { "gtk-media-previous", "P_revious", "media-skip-backward" },
+  { "gtk-directory", "Directory", "folder" }, { "gtk-file", "File", "text-x-generic" },
+  { "gtk-harddisk", "_Harddisk", "drive-harddisk" }, { "gtk-network", "_Network", "network-workgroup" },
+  { "gtk-color-picker", "Color Picker", "color-picker" }, { "gtk-sort-ascending", "_Ascending", "view-sort-ascending" },
+  { "gtk-sort-descending", "_Descending", "view-sort-descending" }, { "gtk-strikethrough", "_Strikethrough", "format-text-strikethrough" },
+  { "gtk-justify-left", "_Left", "format-justify-left" }, { "gtk-justify-right", "_Right", "format-justify-right" },
+  { "gtk-justify-center", "_Center", "format-justify-center" }, { "gtk-justify-fill", "_Fill", "format-justify-fill" },
+  { "gtk-missing-image", "Missing image", "image-missing" }, { "gtk-discard", "_Discard", "edit-clear" },
+  { "gtk-connect", "_Connect", "network-connect" }, { "gtk-disconnect", "_Disconnect", "network-disconnect" },
+  { "gtk-dnd", "Drag and drop", "text-x-generic" }, { "gtk-caps-lock-warning", "Caps Lock is on", "dialog-warning" },
+};
+
+/* stock items and icons registered by the program (gtk_stock_add, icon factories) */
+QHash<QString, QByteArray> gtkqt_user_stock_labels;
+QHash<QString, QIcon> gtkqt_user_icons;
+
 static const StockItem *find_stock (const gchar *id)
 {
   if (!id) return nullptr;
+  if (gtkqt_user_stock_labels.contains (QString::fromUtf8 (id))) {
+    static StockItem user;
+    static QByteArray keep_id, keep_label;
+    keep_id = id;
+    keep_label = gtkqt_user_stock_labels.value (QString::fromUtf8 (id));
+    const StockItem *builtin = nullptr;
+    for (const StockItem &s : stock_items)
+      if (!strcmp (s.id, id)) builtin = &s;
+    for (const StockItem &s : stock_items2)
+      if (!strcmp (s.id, id)) builtin = &s;
+    user = { keep_id.constData (), keep_label.constData (), builtin ? builtin->icon : keep_id.constData () };
+    return &user;
+  }
   for (const StockItem &s : stock_items)
+    if (!strcmp (s.id, id)) return &s;
+  for (const StockItem &s : stock_items2)
     if (!strcmp (s.id, id)) return &s;
   return nullptr;
 }
@@ -382,6 +424,7 @@ QString gtkqt_stock_label (const gchar *stock_id)
 QIcon gtkqt_icon (const gchar *icon_name)
 {
   if (!icon_name || !*icon_name) return QIcon ();
+  if (gtkqt_user_icons.contains (QString::fromUtf8 (icon_name))) return gtkqt_user_icons.value (QString::fromUtf8 (icon_name));
   if (const StockItem *s = find_stock (icon_name))
     icon_name = s->icon;
   QString name = QString::fromUtf8 (icon_name);
@@ -609,6 +652,7 @@ static void gtk_widget_init (GtkWidget *w)
   /* GTK 4 widgets are visible by default (toplevels are not). */
   w->priv->visible = gtkqt_api >= 4;
   w->flags = GTK_SENSITIVE | GTK_PARENT_SENSITIVE;
+  w->style = gtkqt_default_style_ref ();
 }
 
 static void gtk_widget_constructed (GObject *o)
@@ -654,8 +698,10 @@ static void gtk_widget_dispose (GObject *o)
 static void gtk_widget_finalize (GObject *o)
 {
   GtkWidget *w = GTK_WIDGET (o);
-  g_free (w->window);
+  if (w->window) { w->window->widget = nullptr; g_object_unref (w->window); }
   w->window = nullptr;
+  if (w->style) g_object_unref (w->style);
+  w->style = nullptr;
   delete w->priv;
   w->priv = nullptr;
   G_OBJECT_CLASS (gtk_widget_parent_class)->finalize (o);
@@ -716,6 +762,21 @@ static void gtk_widget_class_init (GtkWidgetClass *klass)
   widget_signals[SIG_FOCUS_IN] = sigev ("focus-in-event", G_STRUCT_OFFSET (GtkWidgetClass, focus_in_event));
   widget_signals[SIG_FOCUS_OUT] = sigev ("focus-out-event", G_STRUCT_OFFSET (GtkWidgetClass, focus_out_event));
   widget_signals[SIG_EXPOSE] = sigev ("expose-event", G_STRUCT_OFFSET (GtkWidgetClass, expose_event));
+  /* GTK 2 drag-and-drop and style signals (gtk2.cpp emits them) */
+  g_signal_new ("style-set", t, G_SIGNAL_RUN_FIRST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 1, G_TYPE_OBJECT);
+  g_signal_new ("state-changed", t, G_SIGNAL_RUN_FIRST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 1, G_TYPE_INT);
+  g_signal_new ("drag-motion", t, G_SIGNAL_RUN_LAST, 0, g_signal_accumulator_true_handled, nullptr, nullptr,
+                G_TYPE_BOOLEAN, 4, G_TYPE_OBJECT, G_TYPE_INT, G_TYPE_INT, G_TYPE_UINT);
+  g_signal_new ("drag-drop", t, G_SIGNAL_RUN_LAST, 0, g_signal_accumulator_true_handled, nullptr, nullptr,
+                G_TYPE_BOOLEAN, 4, G_TYPE_OBJECT, G_TYPE_INT, G_TYPE_INT, G_TYPE_UINT);
+  g_signal_new ("drag-leave", t, G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 2, G_TYPE_OBJECT, G_TYPE_UINT);
+  g_signal_new ("drag-data-received", t, G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 6,
+                G_TYPE_OBJECT, G_TYPE_INT, G_TYPE_INT, G_TYPE_POINTER, G_TYPE_UINT, G_TYPE_UINT);
+  g_signal_new ("drag-begin", t, G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 1, G_TYPE_OBJECT);
+  g_signal_new ("drag-end", t, G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 1, G_TYPE_OBJECT);
+  g_signal_new ("drag-data-get", t, G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 4,
+                G_TYPE_OBJECT, G_TYPE_POINTER, G_TYPE_UINT, G_TYPE_UINT);
+  g_signal_new ("drag-data-delete", t, G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 1, G_TYPE_OBJECT);
   widget_signals[SIG_GRAB_FOCUS] = sig0 ("grab-focus", 0);
   widget_signals[SIG_STATE_FLAGS_CHANGED] = g_signal_new ("state-flags-changed", t, G_SIGNAL_RUN_FIRST, 0, nullptr,
                                                           nullptr, nullptr, G_TYPE_NONE, 1, G_TYPE_UINT);
@@ -1357,7 +1418,10 @@ void gtk_widget_grab_focus (GtkWidget *widget)
 {
   QWidget *qw = gtkqt_qw (widget);
   if (QWidget *inner = gtkqt_inner<QWidget> (widget)) qw = inner;
-  if (qw) qw->setFocus (Qt::OtherFocusReason);
+  if (qw) {
+    qw->setFocus (Qt::OtherFocusReason);
+    qw->window ()->setProperty ("gtkqt-focus-chosen", true);
+  }
   g_signal_emit (widget, widget_signals[SIG_GRAB_FOCUS], 0);
 }
 
@@ -1506,7 +1570,9 @@ void gtk_widget_add_accelerator (GtkWidget *widget, const gchar *accel_signal, G
   g_free (name);
   QObject *o = gtkqt_obj (widget);
   if (auto *a = qobject_cast<QAction *> (o)) {
-    a->setShortcut (seq);
+    QList<QKeySequence> all = a->shortcuts ();   /* GTK shows the first accelerator */
+    if (!all.contains (seq)) all << seq;
+    a->setShortcuts (all);
     if (accel_group) gtkqt_accel_group_add_action (accel_group, a);
     return;
   }

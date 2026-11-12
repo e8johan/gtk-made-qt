@@ -32,7 +32,7 @@ static void dialog_constructed (GObject *o)
   gtk_box_pack_end (GTK_BOX (d->vbox), d->action_area, FALSE, TRUE, 0);
   gtk_widget_show (d->action_area);
   gtk_widget_show (d->vbox);
-  if (QWidget *qw = gtkqt_qw (GTK_WIDGET (d)); qw && !qobject_cast<QFileDialog *> (qw))
+  if (QWidget *qw = gtkqt_qw (GTK_WIDGET (d)); qw && !qw->property ("gtkqt-self-drawn").toBool ())
     gtk_container_add (GTK_CONTAINER (d), d->vbox);
   else
     g_object_ref_sink (d->vbox);   /* file chooser: Qt draws everything itself */
@@ -147,13 +147,19 @@ void gtk_dialog_add_action_widget (GtkDialog *dialog, GtkWidget *child, gint res
     if (response_id == GTK_RESPONSE_ACCEPT || response_id == GTK_RESPONSE_OK || response_id == GTK_RESPONSE_YES ||
         response_id == GTK_RESPONSE_APPLY) {
       g_object_set_data (G_OBJECT (dialog), "gtkqt-accept-id", GINT_TO_POINTER (response_id));
-      if (const char *label = gtk_button_get_label (GTK_BUTTON (child)))
-        fd->setLabelText (QFileDialog::Accept, gtkqt_mnemonic (label).remove ('&'));
+      if (const char *label = gtk_button_get_label (GTK_BUTTON (child))) {
+        QString text = g_str_has_prefix (label, "gtk-") ? gtkqt_stock_label (label) : gtkqt_mnemonic (label);
+        fd->setLabelText (QFileDialog::Accept, text.remove ('&'));
+      }
     } else {
       g_object_set_data (G_OBJECT (dialog), "gtkqt-cancel-id", GINT_TO_POINTER (response_id));
     }
+    /* not shown, but owned by the dialog: programs keep using the pointer */
     g_object_ref_sink (child);
-    g_object_unref (child);
+    auto *kept = (GList *) g_object_steal_data (G_OBJECT (dialog), "gtkqt-hidden-actions");
+    kept = g_list_prepend (kept, child);
+    g_object_set_data_full (G_OBJECT (dialog), "gtkqt-hidden-actions", kept,
+                            [] (gpointer l) { g_list_free_full ((GList *) l, g_object_unref); });
     return;
   }
   gtk_box_pack_start (GTK_BOX (dialog->action_area), child, FALSE, TRUE, 0);
@@ -517,9 +523,10 @@ void gtk_file_filter_add_pixbuf_formats (GtkFileFilter *f)
 /* ======================================================================
  * GtkFileChooserDialog (a QFileDialog) and GtkFileChooserNative
  * ====================================================================== */
-static QObject *file_chooser_create (GtkWidget *w)
+QObject *gtkqt_file_dialog_create (GtkWidget *w)
 {
   auto *fd = new QFileDialog;
+  fd->setProperty ("gtkqt-self-drawn", true);
   fd->setOption (QFileDialog::DontUseNativeDialog, true);
   fd->setWindowFlag (Qt::Window);
   gtkqt_connect (w, fd, &QDialog::finished, [] (GtkWidget *dw, int result) {
@@ -537,7 +544,7 @@ G_DEFINE_TYPE (GtkFileChooserDialog, gtk_file_chooser_dialog, GTK_TYPE_DIALOG)
 static void gtk_file_chooser_dialog_init (GtkFileChooserDialog *) {}
 static void gtk_file_chooser_dialog_class_init (GtkFileChooserDialogClass *klass)
 {
-  gtkqt_set_create (GTK_WIDGET_CLASS (klass), file_chooser_create);
+  gtkqt_set_create (GTK_WIDGET_CLASS (klass), gtkqt_file_dialog_create);
   gtkqt_prop (klass, g_param_spec_enum ("action", nullptr, nullptr, gtk_file_chooser_action_get_type (), 0, RW),
               [] (GObject *o, const GValue *v) { gtk_file_chooser_set_action ((GtkFileChooser *) o, (GtkFileChooserAction) g_value_get_enum (v)); }, nullptr);
   gtkqt_prop (klass, g_param_spec_boolean ("select-multiple", nullptr, nullptr, FALSE, RW),

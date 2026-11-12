@@ -12,14 +12,9 @@
 
 #define RW (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)
 
-struct _GdkWindow { GtkWidget *widget; };
-
 GdkWindow *gtkqt_gdk_window (GtkWidget *w)
 {
-  if (!w->window) {
-    w->window = g_new0 (GdkWindow, 1);
-    w->window->widget = w;
-  }
+  if (!w->window) w->window = gtkqt_drawable_new (GTKQT_DRAWABLE_WINDOW, w);
   return w->window;
 }
 
@@ -601,8 +596,8 @@ void gdk_cairo_rectangle (cairo_t *cr, const GdkRectangle *r) { cairo_rectangle 
 
 cairo_t *gdk_cairo_create (GdkWindow *window)
 {
-  if (window && window->widget && window->widget->priv && window->widget->priv->paint_surface)
-    return cairo_create (window->widget->priv->paint_surface);
+  if (cairo_surface_t *target = window ? gtkqt_drawable_target (window) : nullptr)
+    return cairo_create (target);
   /* Outside a draw handler there is nothing to draw on (GTK 2 drew straight
    * to the window); hand out a scratch surface so the code still runs. */
   cairo_surface_t *s = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, 1, 1);
@@ -611,12 +606,18 @@ cairo_t *gdk_cairo_create (GdkWindow *window)
   return cr;
 }
 
-int gdk_window_get_width (GdkWindow *window) { return window ? gtk_widget_get_allocated_width (window->widget) : 0; }
-int gdk_window_get_height (GdkWindow *window) { return window ? gtk_widget_get_allocated_height (window->widget) : 0; }
+int gdk_window_get_width (GdkWindow *window) { int w = 0; gdk_drawable_get_size (window, &w, nullptr); return w; }
+int gdk_window_get_height (GdkWindow *window) { int h = 0; gdk_drawable_get_size (window, nullptr, &h); return h; }
 
 void gdk_window_invalidate_rect (GdkWindow *window, const GdkRectangle *rect, gboolean)
 {
   if (!window) return;
+  if (window->qw) {
+    if (rect) window->qw->update (rect->x, rect->y, rect->width, rect->height);
+    else window->qw->update ();
+    return;
+  }
+  if (!window->widget) return;
   if (rect) gtk_widget_queue_draw_area (window->widget, rect->x, rect->y, rect->width, rect->height);
   else gtk_widget_queue_draw (window->widget);
 }

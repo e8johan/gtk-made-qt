@@ -11,12 +11,12 @@ set(GTKQT_QT_MAJOR 6 CACHE STRING "Qt major version to build against (6 or 5)")
 option(GTKQT_BUILD_EXAMPLES "Build the GTK example programs against the shim" ON)
 option(GTKQT_BUILD_TESTS "Build the test suite" ON)
 
-find_package(Qt${GTKQT_QT_MAJOR} REQUIRED COMPONENTS Widgets)
+find_package(Qt${GTKQT_QT_MAJOR} REQUIRED COMPONENTS Widgets PrintSupport)
 find_package(PkgConfig REQUIRED)
 # GLib/GObject/GIO are plain C utility libraries (not GTK). Qt itself already
 # runs on the GLib main loop on Linux, so they come along for free.
 pkg_check_modules(GLIB REQUIRED IMPORTED_TARGET glib-2.0 gobject-2.0 gio-2.0 gmodule-2.0)
-pkg_check_modules(CAIRO REQUIRED IMPORTED_TARGET cairo)
+pkg_check_modules(CAIRO REQUIRED IMPORTED_TARGET cairo pango pangocairo)
 
 set(GTKQT_SOURCES
     src/core.cpp
@@ -31,6 +31,9 @@ set(GTKQT_SOURCES
     src/treeview.cpp
     src/builder.cpp
     src/uimanager.cpp
+    src/gtk2.cpp
+    src/print.cpp
+    src/script.cpp
 )
 
 # GtkBuilder's table of the library's own GType functions
@@ -52,7 +55,7 @@ target_include_directories(gtk-made-qt PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/gtk-made-qt>
     PRIVATE ${GTKQT_GENERATED})
-target_link_libraries(gtk-made-qt PUBLIC PkgConfig::GLIB PkgConfig::CAIRO Qt::Widgets)
+target_link_libraries(gtk-made-qt PUBLIC PkgConfig::GLIB PkgConfig::CAIRO Qt::Widgets Qt::PrintSupport)
 set_target_properties(gtk-made-qt PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     C_VISIBILITY_PRESET hidden CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON
@@ -72,8 +75,8 @@ GROUP ( ${archive} )
 INPUT ( ${qtlibs} -lstdc++ -lm )
 ")
 endfunction()
-set(GTKQT_BUILD_QT "$<TARGET_LINKER_FILE:Qt${GTKQT_QT_MAJOR}::Widgets> $<TARGET_LINKER_FILE:Qt${GTKQT_QT_MAJOR}::Gui> $<TARGET_LINKER_FILE:Qt${GTKQT_QT_MAJOR}::Core>")
-set(GTKQT_INSTALL_QT "-lQt${GTKQT_QT_MAJOR}Widgets -lQt${GTKQT_QT_MAJOR}Gui -lQt${GTKQT_QT_MAJOR}Core")
+set(GTKQT_BUILD_QT "$<TARGET_LINKER_FILE:Qt${GTKQT_QT_MAJOR}::PrintSupport> $<TARGET_LINKER_FILE:Qt${GTKQT_QT_MAJOR}::Widgets> $<TARGET_LINKER_FILE:Qt${GTKQT_QT_MAJOR}::Gui> $<TARGET_LINKER_FILE:Qt${GTKQT_QT_MAJOR}::Core>")
+set(GTKQT_INSTALL_QT "-lQt${GTKQT_QT_MAJOR}PrintSupport -lQt${GTKQT_QT_MAJOR}Widgets -lQt${GTKQT_QT_MAJOR}Gui -lQt${GTKQT_QT_MAJOR}Core")
 set(GTKQT_STAGE ${CMAKE_CURRENT_BINARY_DIR}/install-files)
 foreach(n ${GTKQT_LINK_NAMES})
     gtkqt_link_script(${CMAKE_CURRENT_BINARY_DIR}/lib/lib${n}.so ${CMAKE_CURRENT_BINARY_DIR}/lib/libgtk-made-qt.a "${GTKQT_BUILD_QT}")
