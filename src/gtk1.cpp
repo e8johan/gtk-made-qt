@@ -601,6 +601,50 @@ GdkWindow *gdk_window_get_toplevel (GdkWindow *window)
 gboolean gdk_window_is_visible (GdkWindow *window) { QWidget *qw = win_qwidget (window); return qw && qw->isVisible (); }
 gboolean gdk_window_is_viewable (GdkWindow *window) { return gdk_window_is_visible (window); }
 void gdk_window_add_filter (GdkWindow *, gpointer, gpointer) {}
+
+static void set_state (GdkWindow *window, Qt::WindowState st, bool on)
+{
+  QWidget *qw = win_qwidget (window);
+  if (!qw) return;
+  qw = qw->window ();
+  qw->setWindowState (on ? qw->windowState () | st : qw->windowState () & ~st);
+}
+void gdk_window_iconify (GdkWindow *window) { set_state (window, Qt::WindowMinimized, true); }
+void gdk_window_deiconify (GdkWindow *window) { set_state (window, Qt::WindowMinimized, false); }
+void gdk_window_maximize (GdkWindow *window) { set_state (window, Qt::WindowMaximized, true); }
+void gdk_window_unmaximize (GdkWindow *window) { set_state (window, Qt::WindowMaximized, false); }
+void gdk_window_fullscreen (GdkWindow *window) { set_state (window, Qt::WindowFullScreen, true); }
+void gdk_window_unfullscreen (GdkWindow *window) { set_state (window, Qt::WindowFullScreen, false); }
+void gdk_window_stick (GdkWindow *) {}
+void gdk_window_unstick (GdkWindow *) {}
+void gdk_window_set_keep_above (GdkWindow *window, gboolean on)
+{
+  if (QWidget *qw = win_qwidget (window)) set_window_flags (qw->window (), Qt::WindowStaysOnTopHint, on);
+}
+void gdk_window_set_keep_below (GdkWindow *window, gboolean on)
+{
+  if (QWidget *qw = win_qwidget (window)) set_window_flags (qw->window (), Qt::WindowStaysOnBottomHint, on);
+}
+void gdk_window_set_skip_taskbar_hint (GdkWindow *, gboolean) {}
+void gdk_window_set_skip_pager_hint (GdkWindow *, gboolean) {}
+void gdk_window_focus (GdkWindow *window, guint32)
+{
+  if (QWidget *qw = win_qwidget (window)) { qw->window ()->raise (); qw->window ()->activateWindow (); }
+}
+/* the window manager moves or resizes the window (skinned windows drag themselves this way) */
+void gdk_window_begin_move_drag (GdkWindow *window, gint, gint, gint, guint32)
+{
+  QWidget *qw = win_qwidget (window);
+  if (qw && qw->window ()->windowHandle ()) qw->window ()->windowHandle ()->startSystemMove ();
+}
+void gdk_window_begin_resize_drag (GdkWindow *window, GdkWindowEdge edge, gint, gint, gint, guint32)
+{
+  QWidget *qw = win_qwidget (window);
+  if (!qw || !qw->window ()->windowHandle ()) return;
+  static const Qt::Edges edges[] = { Qt::TopEdge | Qt::LeftEdge, Qt::TopEdge, Qt::TopEdge | Qt::RightEdge, Qt::LeftEdge,
+                                     Qt::RightEdge, Qt::BottomEdge | Qt::LeftEdge, Qt::BottomEdge, Qt::BottomEdge | Qt::RightEdge };
+  qw->window ()->windowHandle ()->startSystemResize (edges[qBound (0, (int) edge, 7)]);
+}
 void gdk_window_remove_filter (GdkWindow *, gpointer, gpointer) {}
 void gdk_add_client_message_filter (GdkAtom, gpointer, gpointer) {}
 void gdk_property_change (GdkWindow *, GdkAtom, GdkAtom, gint, gint, const guchar *, gint) {}

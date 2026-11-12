@@ -36,6 +36,7 @@ set(GTKQT_SOURCES
     src/script.cpp
     src/gtk1.cpp
     src/gtk1widgets.cpp
+    src/gdkx11.c
 )
 
 # GtkBuilder's table of the library's own GType functions
@@ -80,6 +81,15 @@ if(GTKQT_BUILD_SHARED)
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
 endif()
 
+# Xlib for GTK programs that call it next to GDK (src/x11/xlib.c): a small
+# archive of its own, hidden from Qt's use of the system libX11, that
+# -lX11 / -lXext resolve to.
+add_library(gtkqt-x11 STATIC src/x11/xlib.c)
+target_include_directories(gtkqt-x11 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(gtkqt-x11 PRIVATE PkgConfig::GLIB PkgConfig::CAIRO)
+set_target_properties(gtkqt-x11 PROPERTIES POSITION_INDEPENDENT_CODE ON C_VISIBILITY_PRESET hidden
+    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
+
 # Drop-in names: lib/libgtk-x11-2.0.so, libgtk-3.so ... are GNU ld scripts
 # pulling in the archive and Qt, so -lgtk-x11-2.0 works unchanged; the
 # pkg-config files (gtk+-2.0, gtk+-3.0, gtk4 ...) in lib/pkgconfig point
@@ -101,6 +111,24 @@ foreach(n ${GTKQT_LINK_NAMES})
     gtkqt_link_script(${CMAKE_CURRENT_BINARY_DIR}/lib/lib${n}.so ${CMAKE_CURRENT_BINARY_DIR}/lib/libgtk-made-qt.a "${GTKQT_BUILD_QT}")
     gtkqt_link_script(${GTKQT_STAGE}/lib${n}.so ${GTKQT_INSTALL_LIBDIR}/libgtk-made-qt.a "${GTKQT_INSTALL_QT}")
 endforeach()
+foreach(n X11 Xext)
+    gtkqt_link_script(${CMAKE_CURRENT_BINARY_DIR}/lib/lib${n}.so
+        "${CMAKE_CURRENT_BINARY_DIR}/lib/libgtkqt-x11.a ${CMAKE_CURRENT_BINARY_DIR}/lib/libgtk-made-qt.a" "${GTKQT_BUILD_QT}")
+    gtkqt_link_script(${GTKQT_STAGE}/lib${n}.so
+        "${GTKQT_INSTALL_LIBDIR}/libgtkqt-x11.a ${GTKQT_INSTALL_LIBDIR}/libgtk-made-qt.a" "${GTKQT_INSTALL_QT}")
+    if(GTKQT_BUILD_SHARED)
+        file(GENERATE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/lib/shared/lib${n}.so CONTENT
+"/* GNU ld script: GTK made Qt's Xlib layer, private to each object, on the shared library */
+GROUP ( ${CMAKE_CURRENT_BINARY_DIR}/lib/libgtkqt-x11.a )
+INPUT ( ${CMAKE_CURRENT_BINARY_DIR}/lib/libgtk-made-qt.so.0 )
+")
+        file(GENERATE OUTPUT ${GTKQT_STAGE}/shared/lib${n}.so CONTENT
+"/* GNU ld script: GTK made Qt's Xlib layer, private to each object, on the shared library */
+GROUP ( ${GTKQT_INSTALL_LIBDIR}/libgtkqt-x11.a )
+INPUT ( ${CMAKE_INSTALL_FULL_LIBDIR}/libgtk-made-qt.so.0 )
+")
+    endif()
+endforeach()
 
 # pkg-config files: name|api|version|library
 set(GTKQT_PC_FILES
@@ -121,6 +149,28 @@ foreach(pc ${GTKQT_PC_FILES})
     set(PC_LIBDIR ${GTKQT_INSTALL_LIBDIR})
     configure_file(pkgconfig/gtk.pc.in ${GTKQT_STAGE}/pkgconfig/${PCNAME}.pc @ONLY)
 endforeach()
+foreach(pcname x11 xext)
+    foreach(variant "" "shared/")
+        foreach(where build stage)
+            if(where STREQUAL build)
+                set(inc ${CMAKE_CURRENT_SOURCE_DIR}/include)
+                set(lib ${CMAKE_CURRENT_BINARY_DIR}/lib/${variant})
+                set(out ${CMAKE_CURRENT_BINARY_DIR}/lib/${variant}pkgconfig/${pcname}.pc)
+            else()
+                set(inc ${GTKQT_INSTALL_INCLUDEDIR})
+                set(lib ${GTKQT_INSTALL_LIBDIR}/${variant})
+                set(out ${GTKQT_STAGE}/${variant}pkgconfig/${pcname}.pc)
+            endif()
+            if(pcname STREQUAL x11)
+                set(l X11)
+            else()
+                set(l Xext)
+            endif()
+            file(WRITE ${out} "Name: ${pcname}\nDescription: Xlib for GTK programs, on GTK made Qt\nVersion: 1.8.7\nCflags: -I${inc}\nLibs: -L${lib} -l${l}\n")
+        endforeach()
+    endforeach()
+endforeach()
+
 # compatibility: build/pkgconfig as before
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/pkgconfig)
 foreach(pc ${GTKQT_PC_FILES})
@@ -185,7 +235,10 @@ Cflags: -I\${includedir}
 Libs: -L\${libdir}
 ")
 
-install(TARGETS gtk-made-qt ARCHIVE DESTINATION ${GTKQT_INSTALL_LIBDIR})
+install(TARGETS gtk-made-qt gtkqt-x11 ARCHIVE DESTINATION ${GTKQT_INSTALL_LIBDIR})
+foreach(n X11 Xext)
+    install(FILES ${GTKQT_STAGE}/lib${n}.so DESTINATION ${GTKQT_INSTALL_LIBDIR})
+endforeach()
 if(GTKQT_BUILD_SHARED)
     install(TARGETS gtk-made-qt-shared LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_SKIP)
     install(DIRECTORY ${GTKQT_STAGE}/shared/ DESTINATION ${GTKQT_INSTALL_LIBDIR}/shared

@@ -299,6 +299,24 @@ GdkWindow *gdk_window_get_toplevel (GdkWindow *window);
 gboolean   gdk_window_is_visible (GdkWindow *window);
 gboolean   gdk_window_is_viewable (GdkWindow *window);
 void       gdk_window_add_filter (GdkWindow *window, gpointer function, gpointer data);
+/* window-manager requests (GDK 2) */
+typedef enum { GDK_WINDOW_EDGE_NORTH_WEST, GDK_WINDOW_EDGE_NORTH, GDK_WINDOW_EDGE_NORTH_EAST, GDK_WINDOW_EDGE_WEST,
+               GDK_WINDOW_EDGE_EAST, GDK_WINDOW_EDGE_SOUTH_WEST, GDK_WINDOW_EDGE_SOUTH, GDK_WINDOW_EDGE_SOUTH_EAST } GdkWindowEdge;
+void       gdk_window_iconify (GdkWindow *window);
+void       gdk_window_deiconify (GdkWindow *window);
+void       gdk_window_maximize (GdkWindow *window);
+void       gdk_window_unmaximize (GdkWindow *window);
+void       gdk_window_fullscreen (GdkWindow *window);
+void       gdk_window_unfullscreen (GdkWindow *window);
+void       gdk_window_stick (GdkWindow *window);
+void       gdk_window_unstick (GdkWindow *window);
+void       gdk_window_set_keep_above (GdkWindow *window, gboolean setting);
+void       gdk_window_set_keep_below (GdkWindow *window, gboolean setting);
+void       gdk_window_set_skip_taskbar_hint (GdkWindow *window, gboolean skips);
+void       gdk_window_set_skip_pager_hint (GdkWindow *window, gboolean skips);
+void       gdk_window_focus (GdkWindow *window, guint32 timestamp);
+void       gdk_window_begin_move_drag (GdkWindow *window, gint button, gint root_x, gint root_y, guint32 timestamp);
+void       gdk_window_begin_resize_drag (GdkWindow *window, GdkWindowEdge edge, gint button, gint root_x, gint root_y, guint32 timestamp);
 void       gdk_window_remove_filter (GdkWindow *window, gpointer function, gpointer data);
 void       gdk_add_client_message_filter (GdkAtom message_type, gpointer func, gpointer data);
 void       gdk_property_change (GdkWindow *window, GdkAtom property, GdkAtom type, gint format, gint mode,

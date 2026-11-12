@@ -38,6 +38,18 @@ Things that cost time once; check here before debugging something similar.
 - Programs with plugins calling GTK (XMMS) need the shared library: one
   toolkit, one GType registry, one QApplication.
 
+## Xlib
+
+- Never let Xlib functions be visible to Qt's own libX11 use: they live in
+  a separate hidden-visibility archive (lesson from Motif on Qt, where a
+  shared libX11 replacement intercepted Qt's xcb platform).
+- X's predefined atoms have fixed numbers (`XA_WM_NAME` is 39): GDK's atom
+  table starts with them, and GDK's CLIPBOARD (69) is the first free one.
+- Setting `WM_NAME` with Xlib does not change `gtk_window_get_title`, on real
+  GTK either.
+- In C, `XWindowAttributes` and `Visual` have `class`; `c_class` is the C++
+  spelling.
+
 ## Implementation pitfalls
 
 - Static functions in an `extern "C"` block have C linkage: their forward

@@ -81,6 +81,31 @@ GDK 1 fonts are X font names mapped to system fonts and drawn with Pango;
 XPM data and files load through Qt; masks become widget masks (shaped
 windows); GdkImage and GdkRGB are 32-bit images.
 
+## Xlib next to GDK
+
+GTK programs often call Xlib for things GDK lacked: window-manager hints,
+properties, an occasional XDrawLine on a GDK window. `include/X11` has the
+genuine X11 headers (taken from the Motif on Qt project, as is the fake
+Display that Xlib's macros read). `gdk/gdkx.h` gives GDK windows and
+pixmaps X ids and maps X atoms onto GDK atoms (X's predefined atoms keep
+their numbers). The Xlib functions live in `src/x11/xlib.c`, built on the
+public GDK API only, as a separate archive `libgtkqt-x11.a` that `-lX11` and
+`-lXext` resolve to:
+
+- properties are kept on the GdkWindow; `WM_NAME`, `_MOTIF_WM_HINTS`,
+  `_NET_WM_STATE`, `_WIN_LAYER` act on the Qt window, and client messages
+  to the root window (`_NET_WM_STATE`, `_NET_WM_MOVERESIZE`,
+  `WM_CHANGE_STATE`, `_NET_ACTIVE_WINDOW`) are window-manager requests -
+  `_NET_WM_MOVERESIZE` becomes `QWindow::startSystemMove/Resize`; the root
+  window announces them in `_NET_SUPPORTED`
+- GCs wrap GdkGCs, so Xlib drawing lands in the same backing store as GDK
+- there is no X event queue: GDK delivers the events
+
+The archive has hidden visibility and every program or plugin gets its own
+copy, while windows, properties and atoms live in the toolkit. So Qt's own
+use of the system libX11 (xcb platform) never meets these functions, and
+nothing depends on libX11 at run time.
+
 ## Linking
 
 `libgtk-made-qt.a` with hidden visibility. `lib/libgtk-x11-2.0.so`,
