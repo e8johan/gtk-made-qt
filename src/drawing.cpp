@@ -813,6 +813,114 @@ void gdk_cairo_set_source_pixbuf (cairo_t *cr, const GdkPixbuf *pixbuf, double x
   cairo_surface_destroy (s);
 }
 
+} /* extern "C" */
+
+/* ---------- the GDK lock ----------
+ *
+ * GTK 2 programs call GTK from their own threads between gdk_threads_enter()
+ * and gdk_threads_leave(); GTK serialises them with one big lock. Qt widgets
+ * belong to the GUI thread (signals between threads are queued, objects made
+ * elsewhere belong elsewhere), so here the section between enter and leave
+ * runs ON the GUI thread: enter saves the calling thread's context, the GUI
+ * thread switches to it (swapcontext) at its next turn of the event loop,
+ * and leave switches back; the calling thread meanwhile waits on a small
+ * stack of its own and then continues where leave returned. Like the lock,
+ * enter waits until the GUI thread is free, and the section is atomic with
+ * respect to the GUI thread's own GTK code. The GUI thread's own enter/leave
+ * calls only count nesting.
+ */
+#ifdef GTKQT_HAVE_SWAPCONTEXT
+#include <ucontext.h>
+#include <vector>
+
+namespace {
+struct Handover {
+  ucontext_t worker, gui, park;
+  GMutex lock;
+  GCond done;
+  bool resume = false;
+  int depth = 1;
+  void *park_stack = nullptr;
+};
+constexpr size_t PARK_STACK = 256 * 1024;
+bool threads_on = false;
+GThread *gui_thread = nullptr;
+std::vector<Handover *> running;   /* GUI thread only: sections in progress, innermost last */
+
+bool on_gui_thread () { return g_thread_self () == gui_thread; }
+
+gboolean run_section (gpointer data)
+{
+  auto *h = static_cast<Handover *> (data);
+  running.push_back (h);
+  swapcontext (&h->gui, &h->worker);   /* back here when the section's leave runs */
+  running.pop_back ();
+  g_mutex_lock (&h->lock);
+  h->resume = true;
+  g_cond_signal (&h->done);
+  g_mutex_unlock (&h->lock);           /* h belongs to the worker again */
+  return G_SOURCE_REMOVE;
+}
+
+/* the waiting thread's own stack while its section runs on the GUI thread */
+void park (unsigned lo, unsigned hi)
+{
+  auto *h = reinterpret_cast<Handover *> ((uintptr_t (hi) << 32) | lo);
+  g_main_context_invoke_full (nullptr, G_PRIORITY_DEFAULT, run_section, h, nullptr);
+  g_mutex_lock (&h->lock);
+  while (!h->resume) g_cond_wait (&h->done, &h->lock);
+  g_mutex_unlock (&h->lock);
+  setcontext (&h->worker);
+}
+}
+
+void gtkqt_threads_init (void)
+{
+  if (!gui_thread) gui_thread = g_thread_self ();
+  threads_on = true;
+}
+
+void gtkqt_threads_enter (void)
+{
+  if (!threads_on) return;
+  if (on_gui_thread ()) {
+    if (!running.empty ()) running.back ()->depth++;
+    return;
+  }
+  auto *h = new Handover;
+  g_mutex_init (&h->lock);
+  g_cond_init (&h->done);
+  h->park_stack = g_malloc (PARK_STACK);
+  getcontext (&h->park);
+  h->park.uc_stack.ss_sp = h->park_stack;
+  h->park.uc_stack.ss_size = PARK_STACK;
+  h->park.uc_link = nullptr;
+  uintptr_t p = reinterpret_cast<uintptr_t> (h);
+  makecontext (&h->park, (void (*) ()) park, 2, unsigned (p & 0xffffffffu), unsigned (p >> 32));
+  swapcontext (&h->worker, &h->park);
+  /* now on the GUI thread, until the matching leave */
+}
+
+void gtkqt_threads_leave (void)
+{
+  if (!threads_on || !on_gui_thread () || running.empty ()) return;
+  Handover *h = running.back ();
+  if (--h->depth > 0) return;
+  swapcontext (&h->worker, &h->gui);
+  /* back on the calling thread */
+  g_free (h->park_stack);
+  g_mutex_clear (&h->lock);
+  g_cond_clear (&h->done);
+  delete h;
+}
+#else
+void gtkqt_threads_init (void) {}
+void gtkqt_threads_enter (void) {}
+void gtkqt_threads_leave (void) {}
+#endif
+
+extern "C" {
+
 /* ---------- display / screen / threads ---------- */
 GdkDisplay *gdk_display_get_default (void) { gtkqt_ensure_app (); return (GdkDisplay *) qApp; }
 GdkScreen *gdk_screen_get_default (void) { gtkqt_ensure_app (); return (GdkScreen *) QGuiApplication::primaryScreen (); }
@@ -824,9 +932,9 @@ gint gdk_screen_height (void) { gtkqt_ensure_app (); return gdk_screen_get_heigh
 void gdk_beep (void) { QApplication::beep (); }
 void gdk_display_beep (GdkDisplay *) { QApplication::beep (); }
 void gdk_flush (void) {}
-void gdk_threads_init (void) {}
-void gdk_threads_enter (void) {}
-void gdk_threads_leave (void) {}
+void gdk_threads_init (void) { gtkqt_threads_init (); }
+void gdk_threads_enter (void) { gtkqt_threads_enter (); }
+void gdk_threads_leave (void) { gtkqt_threads_leave (); }
 guint gdk_threads_add_idle (GSourceFunc function, gpointer data) { return g_idle_add (function, data); }
 guint gdk_threads_add_timeout (guint interval, GSourceFunc function, gpointer data) { return g_timeout_add (interval, function, data); }
 

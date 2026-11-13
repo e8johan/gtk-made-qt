@@ -20,6 +20,7 @@
 #include <gio/gio.h>
 #include <gmodule.h>
 #include <gdk/gdk.h>
+#include <atk/atk.h>
 
 #if !defined (GTKQT_COMPILATION) || defined (GTKQT_EXPORT_API)
 #pragma GCC visibility push(default)

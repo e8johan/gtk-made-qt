@@ -50,6 +50,19 @@ typedef GCallback GtkSignalFunc;
 #define GTK_SIGNAL_FUNC(f)                          G_CALLBACK (f)
 #endif
 typedef GSourceFunc GtkFunction;
+/* GTK 2 has these as functions, and programs pass them as callbacks
+ * (Glade's "(GDestroyNotify) gtk_widget_unref"): the macros below only
+ * replace calls, a bare name is the function */
+GtkWidget *(gtk_widget_ref) (GtkWidget *widget);
+void       (gtk_widget_unref) (GtkWidget *widget);
+gpointer   (gtk_object_ref) (gpointer object);
+void       (gtk_object_unref) (gpointer object);
+void       (gtk_object_sink) (gpointer object);
+void       (gtk_object_destroy) (gpointer object);
+guint      (gtk_timeout_add) (guint32 interval, GtkFunction function, gpointer data);
+void       (gtk_timeout_remove) (guint id);
+guint      (gtk_idle_add) (GtkFunction function, gpointer data);
+void       (gtk_idle_remove) (guint id);
 /* GTK 1/2 code often passes handlers without GTK_SIGNAL_FUNC (); that
  * compiled for decades, and GCC 14 / clang 16 would now reject it */
 #define gtk_signal_connect(o, name, f, d)           g_signal_connect ((o), (name), G_CALLBACK (f), (d))

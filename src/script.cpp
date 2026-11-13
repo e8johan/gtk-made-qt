@@ -174,6 +174,18 @@ static void run_steps (QStringList steps)
       while (!a.isEmpty ()) { bool num = false; a.first ().toInt (&num); if (num && !name.isEmpty ()) break; name << a.takeFirst (); }
       a.prepend (name.join (' '));
       QWidget *t = find_widget (a.value (0));
+      if (!t && cmd == "click") {
+        /* a notebook tab, by its text */
+        bool found = false;
+        for (QWidget *w : QApplication::topLevelWidgets ()) {
+          if (!w->isVisible ()) continue;
+          for (QTabBar *bar : w->findChildren<QTabBar *> ())
+            for (int i = 0; i < bar->count () && !found; i++)
+              if (bar->isVisible () && QString (bar->tabText (i)).remove ('&') == a.value (0)) { bar->setCurrentIndex (i); found = true; }
+          if (found) break;
+        }
+        if (found) { next (steps, 300); return; }
+      }
       if (!t) { fprintf (stderr, "script: no widget: %s\n", qPrintable (a.value (0))); continue; }
       if (cmd == "focus") { t->activateWindow (); t->setFocus (Qt::OtherFocusReason); }
       else if (auto *b = qobject_cast<QAbstractButton *> (t); b && a.size () < 2) {

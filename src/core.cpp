@@ -386,6 +386,13 @@ static const StockItem stock_items2[] = {
   { "gtk-missing-image", "Missing image", "image-missing" }, { "gtk-discard", "_Discard", "edit-clear" },
   { "gtk-connect", "_Connect", "network-connect" }, { "gtk-disconnect", "_Disconnect", "network-disconnect" },
   { "gtk-dnd", "Drag and drop", "text-x-generic" }, { "gtk-caps-lock-warning", "Caps Lock is on", "dialog-warning" },
+  { "gtk-cdrom", "_CD-ROM", "media-optical" }, { "gtk-floppy", "_Floppy", "media-floppy" },
+  { "gtk-undelete", "_Undelete", "edit-undo" }, { "gtk-select-color", "_Color", "preferences-desktop-color" },
+  { "gtk-media-record", "R_ecord", "media-record" }, { "gtk-media-rewind", "R_ewind", "media-seek-backward" },
+  { "gtk-media-forward", "_Forward", "media-seek-forward" }, { "gtk-zoom-100", "_Normal Size", "zoom-original" },
+  { "gtk-zoom-fit", "Best _Fit", "zoom-fit-best" }, { "gtk-orientation-portrait", "Portrait", "document-page-setup" },
+  { "gtk-orientation-landscape", "Landscape", "document-page-setup" }, { "gtk-dialog-authentication", "Authentication", "dialog-password" },
+  { "gtk-print-report", "Print Report", "document-print" }, { "gtk-dnd-multiple", "Drag and drop", "text-x-generic" },
 };
 
 /* stock items and icons registered by the program (gtk_stock_add, icon factories) */
@@ -451,6 +458,11 @@ QIcon gtkqt_icon (const gchar *icon_name)
     { "edit-delete", QStyle::SP_TrashIcon }, { "user-trash", QStyle::SP_TrashIcon },
     { "media-playback-start", QStyle::SP_MediaPlay }, { "media-playback-pause", QStyle::SP_MediaPause },
     { "media-playback-stop", QStyle::SP_MediaStop }, { "computer", QStyle::SP_ComputerIcon },
+    { "media-optical", QStyle::SP_DriveCDIcon }, { "drive-harddisk", QStyle::SP_DriveHDIcon },
+    { "media-floppy", QStyle::SP_DriveFDIcon }, { "network-workgroup", QStyle::SP_DriveNetIcon },
+    { "media-skip-forward", QStyle::SP_MediaSkipForward }, { "media-skip-backward", QStyle::SP_MediaSkipBackward },
+    { "media-seek-forward", QStyle::SP_MediaSeekForward }, { "media-seek-backward", QStyle::SP_MediaSeekBackward },
+    { "text-x-generic", QStyle::SP_FileIcon }, { "image-missing", QStyle::SP_FileIcon },
   };
   QString base = name;
   if (base.endsWith (QLatin1String ("-symbolic"))) base.chop (9);
@@ -2005,3 +2017,31 @@ void gtk_container_check_resize (GtkContainer *) {}
 GtkWidget *gtk_bin_get_child (GtkBin *bin) { return bin->child; }
 
 } /* extern "C" */
+
+/* ATK: the accessible object is the widget; names go to Qt's accessibility */
+extern "C" {
+AtkObject *gtk_widget_get_accessible (GtkWidget *widget) { return reinterpret_cast<AtkObject *> (widget); }
+
+static void atk_store (AtkObject *a, const char *key, const gchar *value, void (QWidget::*set) (const QString &))
+{
+  auto *w = reinterpret_cast<GtkWidget *> (a);
+  if (!w || !GTK_IS_WIDGET (w)) return;
+  g_object_set_data_full (G_OBJECT (w), key, g_strdup (value), g_free);
+  if (QWidget *qw = gtkqt_qw (w)) (qw->*set) (QString::fromUtf8 (value ? value : ""));
+}
+void atk_object_set_name (AtkObject *a, const gchar *name) { atk_store (a, "gtkqt-atk-name", name, &QWidget::setAccessibleName); }
+void atk_object_set_description (AtkObject *a, const gchar *d) { atk_store (a, "gtkqt-atk-description", d, &QWidget::setAccessibleDescription); }
+const gchar *atk_object_get_name (AtkObject *a)
+{
+  return a && GTK_IS_WIDGET (a) ? (const gchar *) g_object_get_data (G_OBJECT (a), "gtkqt-atk-name") : nullptr;
+}
+const gchar *atk_object_get_description (AtkObject *a)
+{
+  return a && GTK_IS_WIDGET (a) ? (const gchar *) g_object_get_data (G_OBJECT (a), "gtkqt-atk-description") : nullptr;
+}
+/* the actions (click, press ...) are Qt's to offer */
+gint atk_action_get_n_actions (AtkAction *) { return 0; }
+const gchar *atk_action_get_name (AtkAction *, gint) { return nullptr; }
+const gchar *atk_action_get_description (AtkAction *, gint) { return nullptr; }
+gboolean atk_action_set_description (AtkAction *, gint, const gchar *) { return FALSE; }
+}

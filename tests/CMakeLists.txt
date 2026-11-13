@@ -39,3 +39,9 @@ gtkqt_add_program(test-x11 ${CMAKE_CURRENT_SOURCE_DIR}/test-x11.c 2)
 target_link_libraries(test-x11 PRIVATE gtkqt-x11)
 add_test(NAME x11 COMMAND test-x11)
 set_tests_properties(x11 PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# A Glade 2 era program (Asunder): worker threads under the GDK lock,
+# entry completion, file chooser button, label widgets
+gtkqt_add_program(test-asunder ${CMAKE_CURRENT_SOURCE_DIR}/test-asunder.c 2)
+add_test(NAME asunder COMMAND test-asunder)
+set_tests_properties(asunder PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)

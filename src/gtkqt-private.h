@@ -113,6 +113,11 @@ public:
   bool eventFilter (QObject *watched, QEvent *event) override;
 };
 
+/* the GDK lock: a thread's sections between enter and leave run on the GUI thread */
+void gtkqt_threads_init (void);
+void gtkqt_threads_enter (void);
+void gtkqt_threads_leave (void);
+
 /* Increments while GTK callbacks run from Qt; deferred deletes wait for 0. */
 struct GtkQtEmitGuard {
   GtkQtEmitGuard ();

@@ -333,7 +333,16 @@ void gtk_menu_popup_at_widget (GtkMenu *menu, GtkWidget *widget, int, int, const
 }
 
 void gtk_menu_popdown (GtkMenu *menu) { if (auto *m = gtkqt_q<QMenu> (GTK_WIDGET (menu))) m->hide (); }
-void gtk_menu_attach_to_widget (GtkMenu *, GtkWidget *, gpointer) {}
+void gtk_menu_attach_to_widget (GtkMenu *menu, GtkWidget *attach_widget, gpointer)
+{
+  g_object_set_data (G_OBJECT (menu), "gtkqt-attach-widget", attach_widget);
+}
+void gtk_menu_detach (GtkMenu *menu) { g_object_set_data (G_OBJECT (menu), "gtkqt-attach-widget", nullptr); }
+/* the widget the menu pops up from: its menu item for a submenu */
+GtkWidget *gtk_menu_get_attach_widget (GtkMenu *menu)
+{
+  return (GtkWidget *) g_object_get_data (G_OBJECT (menu), "gtkqt-attach-widget");
+}
 
 void gtk_menu_set_accel_group (GtkMenu *menu, GtkAccelGroup *accel_group)
 {
@@ -538,6 +547,7 @@ void gtk_menu_item_set_submenu (GtkMenuItem *item, GtkWidget *submenu)
   if (!submenu) return;
   g_object_ref_sink (submenu);
   g_object_set_data (G_OBJECT (item), "gtkqt-submenu", submenu);
+  g_object_set_data (G_OBJECT (submenu), "gtkqt-attach-widget", item);
   if (auto *m = gtkqt_q<QMenu> (submenu)) {
     m->setTitle (a ? a->text () : QString ());
     if (a) a->setMenu (m);
@@ -1053,7 +1063,13 @@ void gtk_toolbar_set_style (GtkToolbar *toolbar, GtkToolbarStyle style)
 void gtk_toolbar_set_icon_size (GtkToolbar *toolbar, GtkIconSize icon_size)
 {
   int px = gtkqt_icon_size_px (icon_size);
+  g_object_set_data (G_OBJECT (toolbar), "gtkqt-icon-size", GINT_TO_POINTER (icon_size));
   if (auto *t = gtkqt_q<QToolBar> (GTK_WIDGET (toolbar))) t->setIconSize (QSize (px, px));
+}
+GtkIconSize gtk_toolbar_get_icon_size (GtkToolbar *toolbar)
+{
+  gpointer s = g_object_get_data (G_OBJECT (toolbar), "gtkqt-icon-size");
+  return s ? (GtkIconSize) GPOINTER_TO_INT (s) : GTK_ICON_SIZE_LARGE_TOOLBAR;
 }
 
 gint gtk_toolbar_get_n_items (GtkToolbar *toolbar) { return g_list_length (GTK_WIDGET (toolbar)->priv->children); }

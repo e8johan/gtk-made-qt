@@ -57,6 +57,23 @@ QFontDialog. GtkPrintOperation draws each page with cairo in points onto an
 image at the printer's resolution and gives it to QPrinter (print dialog,
 preview, or PDF).
 
+## Threads (the GDK lock)
+
+GTK 2 programs call GTK from worker threads between `gdk_threads_enter()`
+and `gdk_threads_leave()`; GTK serialises them with one big lock. Qt widgets
+must be used from the GUI thread only (a signal emitted elsewhere is queued,
+an object created elsewhere belongs to that thread), so after
+`gdk_threads_init()` the section between enter and leave is run on the GUI
+thread itself: enter saves the worker's context and asks the GUI thread
+(an idle source) to switch to it with `swapcontext()`; leave switches back,
+and the worker, which waited on a small stack of its own, continues after
+leave. Inside the section `g_thread_self()` and `QThread::currentThread()`
+are the GUI thread's, so GTK code runs exactly as in a callback. Like the
+lock, enter blocks until the GUI thread is free, and a thread that enters
+while the GUI thread waits for it (joins it) deadlocks as with GTK. Where
+there is no `swapcontext()` (musl without libucontext) the calls are not
+moved. `src/drawing.cpp`, test `tests/test-asunder.c`.
+
 ## GTK 1.2
 
 API level 1 adds GTK 1's type and signal layer on GObject: `GtkTypeInfo` and

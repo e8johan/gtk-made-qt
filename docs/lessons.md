@@ -22,6 +22,20 @@ Things that cost time once; check here before debugging something similar.
 - `gtk-xft-dpi` is DPI * 1024; programs divide by it.
 - Print contexts work in points (72 dpi) with the origin at the margin;
   programs draw headers at negative y.
+- GTK 2 programs update widgets from worker threads under
+  `gdk_threads_enter()` (Asunder's disc polling and ripping threads). A
+  no-op lock lets Qt lay out a label while the worker changes it (crash in
+  QLabel); a real mutex is not enough either, as Qt then queues the model
+  signals the worker emits. The section has to run on the GUI thread (see
+  architecture.md, Threads).
+- Glade 2 code builds frames with a check button as the label widget, adds
+  notebook pages before `gtk_notebook_set_tab_label`, and packs an
+  alignment into a button before filling it: sizes must follow later
+  changes, not be computed when the child is added.
+- A tree view gets its columns before its model; Qt's header has no
+  sections until then.
+- An icon missing from the theme must leave an empty space (GTK's
+  missing-image), not text.
 
 ## GTK 1.2
 
