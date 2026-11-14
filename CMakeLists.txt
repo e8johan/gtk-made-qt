@@ -77,6 +77,20 @@ if(NOT GTKQT_HAVE_SWAPCONTEXT)
     message(STATUS "No swapcontext: GTK calls from other threads under gdk_threads_enter() are not moved to the GUI thread")
 endif()
 
+# The C++ runtime the link scripts name for C programs: libstdc++, or
+# LLVM's libc++ where that is the system's (Chimera, the BSDs ...)
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles("#include <version>
+#ifndef _LIBCPP_VERSION
+#error not libc++
+#endif
+int main () { return 0; }" GTKQT_LIBCXX)
+if(GTKQT_LIBCXX)
+    set(GTKQT_CXX_RUNTIME "-lc++")
+else()
+    set(GTKQT_CXX_RUNTIME "-lstdc++")
+endif()
+
 option(GTKQT_BUILD_SHARED "Also build the shared library for programs with plugins" ON)
 function(gtkqt_objects name)
     add_library(${name} OBJECT ${GTKQT_SOURCES} ${GTKQT_GENERATED}/types.inc)
@@ -125,7 +139,7 @@ function(gtkqt_link_script file archive qtlibs)
     file(GENERATE OUTPUT ${file} CONTENT
 "/* GNU ld script: GTK made Qt (the GTK API on Qt). */
 GROUP ( ${archive} )
-INPUT ( ${qtlibs} -lstdc++ -lm ${GTKQT_UCONTEXT_LIB} )
+INPUT ( ${qtlibs} ${GTKQT_CXX_RUNTIME} -lm ${GTKQT_UCONTEXT_LIB} )
 ")
 endfunction()
 set(GTKQT_BUILD_QT "$<TARGET_LINKER_FILE:Qt${GTKQT_QT_MAJOR}::PrintSupport> $<TARGET_LINKER_FILE:Qt${GTKQT_QT_MAJOR}::Widgets> $<TARGET_LINKER_FILE:Qt${GTKQT_QT_MAJOR}::Gui> $<TARGET_LINKER_FILE:Qt${GTKQT_QT_MAJOR}::Core>")
