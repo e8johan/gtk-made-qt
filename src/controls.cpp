@@ -356,10 +356,11 @@ static void button_place (GtkContainer *c, GtkWidget *child)
   if (!b->layout ()) {
     auto *l = new QHBoxLayout (b);
     l->setContentsMargins (8, 4, 8, 4);
+    /* the button grows with what is packed into the child later */
+    l->setSizeConstraint (QLayout::SetMinimumSize);
   }
   b->layout ()->addWidget (cw);
   cw->setAttribute (Qt::WA_TransparentForMouseEvents);
-  b->setMinimumSize (b->layout ()->sizeHint ());
 }
 
 G_DEFINE_TYPE (GtkButton, gtk_button, GTK_TYPE_BIN)
@@ -1824,7 +1825,8 @@ static void image_show_icon (GtkImage *image)
   if (px <= 0) px = 16;
   if (!name) return;
   QIcon icon = gtkqt_icon (name);
-  if (icon.isNull ()) l->setText (QStringLiteral ("[%1]").arg (gtkqt_str (name)));
+  /* an icon the theme lacks keeps its space, as GTK's missing-image does */
+  if (icon.isNull ()) { l->clear (); l->setMinimumSize (px, px); }
   else l->setPixmap (icon.pixmap (px, px));
 }
 

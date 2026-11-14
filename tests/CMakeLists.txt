@@ -12,6 +12,12 @@ set_tests_properties(gtk2 PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # GTK 1.2 API (type system, custom widgets, CList, XPM, fonts)
 gtkqt_add_program(test-gtk1 ${CMAKE_CURRENT_SOURCE_DIR}/test-gtk1.c 1)
+# GTK 1 code must compile with the errors GCC 14 and clang 16 turned on
+# (the C mode stays gnu17: C23 has no unprototyped functions, which GTK 1 used)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(test-gtk1 PRIVATE -std=gnu17 -Werror=incompatible-pointer-types -Werror=int-conversion
+        -Werror=implicit-function-declaration -Werror=implicit-int)
+endif()
 add_test(NAME gtk1 COMMAND test-gtk1)
 set_tests_properties(gtk1 PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
@@ -33,3 +39,9 @@ gtkqt_add_program(test-x11 ${CMAKE_CURRENT_SOURCE_DIR}/test-x11.c 2)
 target_link_libraries(test-x11 PRIVATE gtkqt-x11)
 add_test(NAME x11 COMMAND test-x11)
 set_tests_properties(x11 PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# A Glade 2 era program (Asunder): worker threads under the GDK lock,
+# entry completion, file chooser button, label widgets
+gtkqt_add_program(test-asunder ${CMAKE_CURRENT_SOURCE_DIR}/test-asunder.c 2)
+add_test(NAME asunder COMMAND test-asunder)
+set_tests_properties(asunder PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)

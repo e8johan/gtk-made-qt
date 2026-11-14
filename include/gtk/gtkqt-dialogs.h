@@ -107,6 +107,18 @@ GTKQT_SIMPLE_TYPE (GtkFileChooserDialog, GtkDialog)
 GType      gtk_file_chooser_dialog_get_type (void) G_GNUC_CONST;
 GtkWidget *gtk_file_chooser_dialog_new (const gchar *title, GtkWindow *parent, GtkFileChooserAction action,
                                         const gchar *first_button_text, ...) G_GNUC_NULL_TERMINATED;
+/* GtkFileChooserButton: a button showing the chosen file or folder; it owns a file chooser dialog */
+GTKQT_SIMPLE_TYPE (GtkFileChooserButton, GtkHBox)
+#define GTK_TYPE_FILE_CHOOSER_BUTTON (gtk_file_chooser_button_get_type ())
+#define GTK_FILE_CHOOSER_BUTTON(o)   (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_FILE_CHOOSER_BUTTON, GtkFileChooserButton))
+#define GTK_IS_FILE_CHOOSER_BUTTON(o) (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_FILE_CHOOSER_BUTTON))
+GType        gtk_file_chooser_button_get_type (void) G_GNUC_CONST;
+GtkWidget   *gtk_file_chooser_button_new (const gchar *title, GtkFileChooserAction action);
+GtkWidget   *gtk_file_chooser_button_new_with_dialog (GtkWidget *dialog);
+void         gtk_file_chooser_button_set_title (GtkFileChooserButton *button, const gchar *title);
+const gchar *gtk_file_chooser_button_get_title (GtkFileChooserButton *button);
+void         gtk_file_chooser_button_set_width_chars (GtkFileChooserButton *button, gint n_chars);
+gint         gtk_file_chooser_button_get_width_chars (GtkFileChooserButton *button);
 void       gtk_file_chooser_set_action (GtkFileChooser *chooser, GtkFileChooserAction action);
 void       gtk_file_chooser_set_select_multiple (GtkFileChooser *chooser, gboolean select_multiple);
 void       gtk_file_chooser_set_do_overwrite_confirmation (GtkFileChooser *chooser, gboolean do_overwrite_confirmation);

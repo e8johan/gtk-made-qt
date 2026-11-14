@@ -394,7 +394,31 @@ gboolean gtk_window_set_icon_from_file (GtkWindow *window, const gchar *filename
   return TRUE;
 }
 
-void gtk_window_set_type_hint (GtkWindow *, int) {}
+/* the hint picks the Qt window type, which the window manager sees the same way */
+void gtk_window_set_type_hint (GtkWindow *window, GdkWindowTypeHint hint)
+{
+  if (!GTK_IS_WINDOW (window)) return;
+  g_object_set_data (G_OBJECT (window), "gtkqt-type-hint", GINT_TO_POINTER (hint));
+  QWidget *qw = gtkqt_qw (GTK_WIDGET (window));
+  if (!qw || !qw->isWindow ()) return;
+  Qt::WindowType type;
+  switch (hint) {
+  case GDK_WINDOW_TYPE_HINT_DIALOG: type = Qt::Dialog; break;
+  case GDK_WINDOW_TYPE_HINT_UTILITY: case GDK_WINDOW_TYPE_HINT_TOOLBAR: type = Qt::Tool; break;
+  case GDK_WINDOW_TYPE_HINT_SPLASHSCREEN: type = Qt::SplashScreen; break;
+  case GDK_WINDOW_TYPE_HINT_NORMAL: type = Qt::Window; break;
+  default: return;   /* menus, tooltips ...: GTK makes those itself */
+  }
+  bool visible = qw->isVisible ();
+  Qt::WindowFlags flags = (qw->windowFlags () & ~Qt::WindowType_Mask) | type;
+  if (flags == qw->windowFlags ()) return;
+  qw->setWindowFlags (flags);
+  if (visible) qw->show ();
+}
+GdkWindowTypeHint gtk_window_get_type_hint (GtkWindow *window)
+{
+  return (GdkWindowTypeHint) GPOINTER_TO_INT (g_object_get_data (G_OBJECT (window), "gtkqt-type-hint"));
+}
 void gtk_window_set_wmclass (GtkWindow *, const gchar *, const gchar *) {}
 void gtk_window_set_role (GtkWindow *, const gchar *) {}
 
@@ -1148,10 +1172,36 @@ static QObject *frame_create (GtkWidget *)
 }
 
 G_DEFINE_TYPE (GtkFrame, gtk_frame, GTK_TYPE_BIN)
+
+/* A label widget that is not a GtkLabel (a check button, typically) is a
+ * child of the frame shown as its first row; a GtkLabel becomes the title. */
+static void frame_place (GtkContainer *c, GtkWidget *child)
+{
+  if (g_object_get_data (G_OBJECT (c), "gtkqt-frame-label") == child) {
+    auto *g = gtkqt_q<QGroupBox> (GTK_WIDGET (c));
+    QWidget *cw = gtkqt_qw (child);
+    if (g && cw) static_cast<QBoxLayout *> (g->layout ())->insertWidget (0, cw);
+    return;
+  }
+  auto place = (GtkQtPlaceFunc) GTK_CONTAINER_CLASS (gtk_frame_parent_class)->gtkqt_place;
+  if (place) place (c, child);
+}
+static void frame_unplace (GtkContainer *c, GtkWidget *child)
+{
+  if (g_object_get_data (G_OBJECT (c), "gtkqt-frame-label") == child) {
+    g_object_set_data (G_OBJECT (c), "gtkqt-frame-label", nullptr);
+    if (QWidget *cw = gtkqt_qw (child)) { cw->hide (); cw->setParent (nullptr); }
+    return;
+  }
+  auto unplace = (GtkQtPlaceFunc) GTK_CONTAINER_CLASS (gtk_frame_parent_class)->gtkqt_unplace;
+  if (unplace) unplace (c, child);
+}
+
 static void gtk_frame_init (GtkFrame *) {}
 static void gtk_frame_class_init (GtkFrameClass *klass)
 {
   gtkqt_set_create (GTK_WIDGET_CLASS (klass), frame_create);
+  gtkqt_set_place (GTK_CONTAINER_CLASS (klass), frame_place, frame_unplace);
   gtkqt_prop (klass, g_param_spec_string ("label", nullptr, nullptr, nullptr, RW),
               [] (GObject *o, const GValue *v) { gtk_frame_set_label (GTK_FRAME (o), g_value_get_string (v)); },
               [] (GObject *o, GValue *v) { g_value_set_string (v, gtk_frame_get_label (GTK_FRAME (o))); });
@@ -1216,6 +1266,37 @@ const gchar *gtk_frame_get_label (GtkFrame *frame)
 {
   auto *g = gtkqt_q<QGroupBox> (GTK_WIDGET (frame));
   return g && !g->title ().isEmpty () ? gtkqt_ret (GTK_WIDGET (frame), g->title ()) : nullptr;
+}
+
+void gtk_frame_set_label_widget (GtkFrame *frame, GtkWidget *label_widget)
+{
+  GObject *o = G_OBJECT (frame);
+  if (auto *old = (GtkWidget *) g_object_get_data (o, "gtkqt-frame-label")) {
+    if (old == label_widget) return;
+    gtk_container_remove (GTK_CONTAINER (frame), old);
+  }
+  if (auto *old = (GtkWidget *) g_object_get_data (o, "gtkqt-frame-title")) {
+    g_object_set_data (o, "gtkqt-frame-title", nullptr);
+    g_object_unref (old);
+  }
+  gtk_frame_set_label (frame, nullptr);
+  if (!label_widget) return;
+  if (GTK_IS_LABEL (label_widget)) {
+    g_object_set_data (o, "gtkqt-frame-title", g_object_ref_sink (label_widget));
+    gtk_frame_set_label (frame, gtk_label_get_text (GTK_LABEL (label_widget)));
+    return;
+  }
+  /* a child that is not the bin's child */
+  GtkWidget *bin_child = GTK_BIN (frame)->child;
+  g_object_set_data (o, "gtkqt-frame-label", label_widget);
+  gtkqt_container_adopt (GTK_CONTAINER (frame), label_widget);
+  GTK_BIN (frame)->child = bin_child;
+}
+
+GtkWidget *gtk_frame_get_label_widget (GtkFrame *frame)
+{
+  if (auto *w = (GtkWidget *) g_object_get_data (G_OBJECT (frame), "gtkqt-frame-label")) return w;
+  return (GtkWidget *) g_object_get_data (G_OBJECT (frame), "gtkqt-frame-title");
 }
 
 void gtk_frame_set_shadow_type (GtkFrame *frame, GtkShadowType type)
@@ -1539,6 +1620,40 @@ void gtk_notebook_set_tab_label_text (GtkNotebook *notebook, GtkWidget *child, c
     int i = t->indexOf (gtkqt_qw (child));
     if (i >= 0) t->setTabText (i, child->priv->tab_label);
   }
+}
+
+void gtk_notebook_set_tab_label (GtkNotebook *notebook, GtkWidget *child, GtkWidget *tab_label)
+{
+  auto *t = gtkqt_q<QTabWidget> (GTK_WIDGET (notebook));
+  int i = t ? t->indexOf (gtkqt_qw (child)) : -1;
+  if (auto *old = (GtkWidget *) g_object_get_data (G_OBJECT (child), "gtkqt-tab-widget")) {
+    if (old == tab_label) return;
+    g_object_set_data (G_OBJECT (child), "gtkqt-tab-widget", nullptr);
+    if (i >= 0 && t->tabBar ()->tabButton (i, QTabBar::LeftSide) == gtkqt_qw (old))
+      t->tabBar ()->setTabButton (i, QTabBar::LeftSide, nullptr);
+    gtk_widget_destroy (old);
+    g_object_unref (old);
+  }
+  if (!tab_label) {
+    gtk_notebook_set_tab_label_text (notebook, child, nullptr);
+    return;
+  }
+  g_object_ref_sink (tab_label);
+  g_object_set_data (G_OBJECT (child), "gtkqt-tab-widget", tab_label);
+  if (GTK_IS_LABEL (tab_label)) {
+    gtk_notebook_set_tab_label_text (notebook, child, gtk_label_get_text (GTK_LABEL (tab_label)));
+  } else if (i >= 0) {
+    t->setTabText (i, QString ());
+    if (QWidget *tw = gtkqt_qw (tab_label)) {
+      t->tabBar ()->setTabButton (i, QTabBar::LeftSide, tw);
+      if (tab_label->priv->visible) tw->show ();
+    }
+  }
+}
+
+GtkWidget *gtk_notebook_get_tab_label (GtkNotebook *, GtkWidget *child)
+{
+  return (GtkWidget *) g_object_get_data (G_OBJECT (child), "gtkqt-tab-widget");
 }
 
 const gchar *gtk_notebook_get_tab_label_text (GtkNotebook *, GtkWidget *child)

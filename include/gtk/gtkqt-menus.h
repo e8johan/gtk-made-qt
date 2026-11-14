@@ -42,6 +42,8 @@ void       gtk_menu_popup_at_pointer (GtkMenu *menu, const GdkEvent *trigger_eve
 void       gtk_menu_popup_at_widget (GtkMenu *menu, GtkWidget *widget, int widget_anchor, int menu_anchor, const GdkEvent *trigger_event);
 void       gtk_menu_popdown (GtkMenu *menu);
 void       gtk_menu_attach_to_widget (GtkMenu *menu, GtkWidget *attach_widget, gpointer detacher);
+void       gtk_menu_detach (GtkMenu *menu);
+GtkWidget *gtk_menu_get_attach_widget (GtkMenu *menu);
 void       gtk_menu_set_accel_group (GtkMenu *menu, GtkAccelGroup *accel_group);
 void       gtk_menu_set_title (GtkMenu *menu, const gchar *title);
 /* GTK 1/2 spellings */
@@ -179,6 +181,7 @@ GtkWidget   *gtk_toolbar_new (void);
 void         gtk_toolbar_insert (GtkToolbar *toolbar, GtkToolItem *item, gint pos);
 void         gtk_toolbar_set_style (GtkToolbar *toolbar, GtkToolbarStyle style);
 void         gtk_toolbar_set_icon_size (GtkToolbar *toolbar, GtkIconSize icon_size);
+GtkIconSize  gtk_toolbar_get_icon_size (GtkToolbar *toolbar);
 gint         gtk_toolbar_get_n_items (GtkToolbar *toolbar);
 GtkToolItem *gtk_tool_item_new (void);
 GtkToolItem *gtk_tool_button_new (GtkWidget *icon_widget, const gchar *label);

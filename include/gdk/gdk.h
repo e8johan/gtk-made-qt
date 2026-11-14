@@ -27,6 +27,11 @@
 G_BEGIN_DECLS
 
 typedef struct _GdkWindow GdkWindow;   /* opaque; one per widget */
+#if GTKQT_API_VERSION == 1
+typedef gulong GdkAtom;                /* GTK 1: an atom is a number, the same as X's Atom */
+#else
+typedef struct _GdkAtom *GdkAtom;
+#endif
 typedef GdkWindow GdkSurface;          /* GTK 4 name */
 typedef struct _GdkDisplay GdkDisplay;
 typedef struct _GdkScreen GdkScreen;
@@ -227,7 +232,7 @@ typedef struct {
   GdkEventType type;
   GdkWindow *window;
   gint8 send_event;
-  struct _GdkAtom *message_type;
+  GdkAtom message_type;
   gushort data_format;
   union { char b[20]; short s[10]; long l[5]; } data;
 } GdkEventClient;
@@ -236,7 +241,7 @@ typedef struct {
   GdkEventType type;
   GdkWindow *window;
   gint8 send_event;
-  struct _GdkAtom *selection, *target, *property;
+  GdkAtom selection, target, property;
   guint32 requestor;
   guint32 time;
 } GdkEventSelection;
@@ -338,7 +343,6 @@ typedef struct _GdkGC GdkGC;
 typedef struct _GdkFont GdkFont;
 typedef struct _GdkColormap GdkColormap;
 typedef struct _GdkVisual GdkVisual;
-typedef struct _GdkAtom *GdkAtom;
 typedef struct _GdkDragContext GdkDragContext;
 typedef struct { gint x, y; } GdkPoint;
 typedef struct { gint x1, y1, x2, y2; } GdkSegment;
@@ -357,8 +361,13 @@ GType gdk_drawable_get_type (void) G_GNUC_CONST;
 #define GDK_IS_GC(o)      (G_TYPE_CHECK_INSTANCE_TYPE ((o), GDK_TYPE_GC))
 GType gdk_gc_get_type (void) G_GNUC_CONST;
 
-#define _GDK_MAKE_ATOM(val) ((GdkAtom) GUINT_TO_POINTER (val))
+#if GTKQT_API_VERSION == 1
+#define _GDK_MAKE_ATOM(val)     ((GdkAtom) (val))
+#define GDK_NONE                0L   /* GTK 1: also "no window" / "no cursor" (gdk_pointer_grab) */
+#else
+#define _GDK_MAKE_ATOM(val)     ((GdkAtom) GUINT_TO_POINTER (val))
 #define GDK_NONE                _GDK_MAKE_ATOM (0)
+#endif
 #define GDK_SELECTION_PRIMARY   _GDK_MAKE_ATOM (1)
 #define GDK_SELECTION_SECONDARY _GDK_MAKE_ATOM (2)
 #define GDK_SELECTION_CLIPBOARD _GDK_MAKE_ATOM (69)

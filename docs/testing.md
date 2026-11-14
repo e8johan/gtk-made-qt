@@ -31,7 +31,7 @@ DISPLAY=:46 ./prog-real & sleep 3; DISPLAY=:46 import -window root real.png; con
   `accept` / `reject` (press the dialog's OK / Cancel response button),
   `shot <png>`, `dump` (widget tree), `quit`. Widgets are found by name
   (`gtk_widget_set_name`), button/label text, or kind (`textview`, `entry`,
-  `treeview`, `window`).
+  `treeview`, `window`); `click <tab text>` also switches notebook pages.
 
 ctest runs `tests/` at all API levels plus every example (`ctest --test-dir build`).
 

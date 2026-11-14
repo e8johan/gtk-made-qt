@@ -388,6 +388,23 @@ static double lo (GdkGC *gc) { int w = gc && gc->v.line_width > 0 ? gc->v.line_w
 
 extern "C" {
 
+/* GTK 1/2's reference counting, destruction, timeouts and idles as
+ * functions: programs pass them as callbacks (see gtkqt-compat.h) */
+GtkWidget *gtk_widget_ref (GtkWidget *widget) { return widget ? (GtkWidget *) g_object_ref (widget) : nullptr; }
+void gtk_widget_unref (GtkWidget *widget) { if (widget) g_object_unref (widget); }
+gpointer gtk_object_ref (gpointer object) { return object ? g_object_ref (object) : nullptr; }
+void gtk_object_unref (gpointer object) { if (object) g_object_unref (object); }
+void gtk_object_sink (gpointer object) { if (object) { g_object_ref_sink (object); g_object_unref (object); } }
+void gtk_object_destroy (gpointer object) { if (object && GTK_IS_WIDGET (object)) gtk_widget_destroy (GTK_WIDGET (object)); }
+guint gtk_timeout_add (guint32 interval, GSourceFunc function, gpointer data) { return g_timeout_add (interval, function, data); }
+void gtk_timeout_remove (guint id) { g_source_remove (id); }
+guint gtk_idle_add (GSourceFunc function, gpointer data) { return g_idle_add (function, data); }
+void gtk_idle_remove (guint id) { g_source_remove (id); }
+
+} /* extern "C" */
+
+extern "C" {
+
 void gdk_draw_point (GdkDrawable *d, GdkGC *gc, gint x, gint y)
 {
   if (cairo_t *cr = gc_cairo (d, gc, false)) { cairo_rectangle (cr, x, y, 1, 1); cairo_fill (cr); cairo_destroy (cr); }
@@ -1495,8 +1512,10 @@ void gtk_drag_dest_set (GtkWidget *widget, GtkDestDefaults flags, const GtkTarge
   if (auto *a = qobject_cast<QAbstractScrollArea *> (qw)) target = a->viewport ();
   target->setAcceptDrops (true);
   qw->setAcceptDrops (true);
-  if (!target->findChild<GtkQtDropFilter *> (QString (), Qt::FindDirectChildrenOnly))
-    target->installEventFilter (new GtkQtDropFilter (widget, target));
+  /* findChild needs Q_OBJECT (Qt 6.11 checks), which the library's classes lack */
+  for (QObject *c : target->children ())
+    if (dynamic_cast<GtkQtDropFilter *> (c)) return;
+  target->installEventFilter (new GtkQtDropFilter (widget, target));
 }
 
 void gtk_drag_dest_unset (GtkWidget *widget) { g_object_set_data (G_OBJECT (widget), "gtkqt-drop", nullptr); }

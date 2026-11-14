@@ -184,7 +184,11 @@ void  gtk_im_context_get_preedit_string (GtkIMContext *context, gchar **str, Pan
 void  gtk_im_context_reset (GtkIMContext *context);
 
 /* ---------- GtkItemFactory (GTK 1.2 / 2.x menus from a table) ---------- */
+#if GTKQT_API_VERSION == 1
+typedef void (*GtkItemFactoryCallback) ();   /* GTK 1: unprototyped, takes any handler */
+#else
 typedef void (*GtkItemFactoryCallback) (void);
+#endif
 typedef void (*GtkItemFactoryCallback1) (gpointer callback_data, guint callback_action, GtkWidget *widget);
 typedef void (*GtkItemFactoryCallback2) (GtkWidget *widget, gpointer callback_data, guint callback_action);
 typedef gchar *(*GtkTranslateFunc) (const gchar *path, gpointer func_data);

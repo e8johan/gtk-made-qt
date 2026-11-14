@@ -135,6 +135,8 @@ GTKQT_SIMPLE_TYPE (GtkFrame, GtkBin)
 GType      gtk_frame_get_type (void) G_GNUC_CONST;
 GtkWidget *gtk_frame_new (const gchar *label);
 void       gtk_frame_set_label (GtkFrame *frame, const gchar *label);
+void       gtk_frame_set_label_widget (GtkFrame *frame, GtkWidget *label_widget);
+GtkWidget *gtk_frame_get_label_widget (GtkFrame *frame);
 const gchar *gtk_frame_get_label (GtkFrame *frame);
 void       gtk_frame_set_shadow_type (GtkFrame *frame, GtkShadowType type);
 void       gtk_frame_set_label_align (GtkFrame *frame, gfloat xalign, gfloat yalign);
@@ -203,6 +205,8 @@ void       gtk_notebook_set_show_tabs (GtkNotebook *notebook, gboolean show_tabs
 void       gtk_notebook_set_show_border (GtkNotebook *notebook, gboolean show_border);
 void       gtk_notebook_set_scrollable (GtkNotebook *notebook, gboolean scrollable);
 void       gtk_notebook_set_tab_label_text (GtkNotebook *notebook, GtkWidget *child, const gchar *tab_text);
+void       gtk_notebook_set_tab_label (GtkNotebook *notebook, GtkWidget *child, GtkWidget *tab_label);
+GtkWidget *gtk_notebook_get_tab_label (GtkNotebook *notebook, GtkWidget *child);
 const gchar *gtk_notebook_get_tab_label_text (GtkNotebook *notebook, GtkWidget *child);
 void       gtk_notebook_set_tab_reorderable (GtkNotebook *notebook, GtkWidget *child, gboolean reorderable);
 

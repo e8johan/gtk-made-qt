@@ -56,10 +56,48 @@ add_custom_command(OUTPUT ${GTKQT_GENERATED}/types.inc
 # GTK themselves, e.g. XMMS) need one copy of the toolkit for all of them:
 # GTKQT_BUILD_SHARED also builds libgtk-made-qt.so, used through
 # "gtk-made-qt-env --shared".
+# gdk_threads_enter() hands a thread's GTK calls to the GUI thread with
+# swapcontext() (see src/drawing.cpp): in glibc, from libucontext on musl.
+include(CheckSymbolExists)
+check_symbol_exists(swapcontext ucontext.h GTKQT_HAVE_SWAPCONTEXT)
+set(GTKQT_UCONTEXT_LIB "")
+if(NOT GTKQT_HAVE_SWAPCONTEXT)
+    find_library(GTKQT_LIBUCONTEXT ucontext)
+    if(GTKQT_LIBUCONTEXT)
+        set(CMAKE_REQUIRED_LIBRARIES ${GTKQT_LIBUCONTEXT})
+        check_symbol_exists(swapcontext ucontext.h GTKQT_HAVE_LIBUCONTEXT)
+        unset(CMAKE_REQUIRED_LIBRARIES)
+        if(GTKQT_HAVE_LIBUCONTEXT)
+            set(GTKQT_HAVE_SWAPCONTEXT ON)
+            set(GTKQT_UCONTEXT_LIB "-lucontext")
+        endif()
+    endif()
+endif()
+if(NOT GTKQT_HAVE_SWAPCONTEXT)
+    message(STATUS "No swapcontext: GTK calls from other threads under gdk_threads_enter() are not moved to the GUI thread")
+endif()
+
+# The C++ runtime the link scripts name for C programs: libstdc++, or
+# LLVM's libc++ where that is the system's (Chimera, the BSDs ...)
+include(CheckCXXSourceCompiles)
+check_cxx_source_compiles("#include <version>
+#ifndef _LIBCPP_VERSION
+#error not libc++
+#endif
+int main () { return 0; }" GTKQT_LIBCXX)
+if(GTKQT_LIBCXX)
+    set(GTKQT_CXX_RUNTIME "-lc++")
+else()
+    set(GTKQT_CXX_RUNTIME "-lstdc++")
+endif()
+
 option(GTKQT_BUILD_SHARED "Also build the shared library for programs with plugins" ON)
 function(gtkqt_objects name)
     add_library(${name} OBJECT ${GTKQT_SOURCES} ${GTKQT_GENERATED}/types.inc)
     target_compile_definitions(${name} PRIVATE GTKQT_COMPILATION QT_NO_KEYWORDS ${ARGN})
+    if(GTKQT_HAVE_SWAPCONTEXT)
+        target_compile_definitions(${name} PRIVATE GTKQT_HAVE_SWAPCONTEXT)
+    endif()
     target_include_directories(${name} PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> PRIVATE ${GTKQT_GENERATED})
     target_link_libraries(${name} PUBLIC PkgConfig::GLIB PkgConfig::CAIRO Qt::Widgets Qt::PrintSupport)
     set_target_properties(${name} PROPERTIES POSITION_INDEPENDENT_CODE ON
@@ -70,13 +108,13 @@ add_library(gtk-made-qt STATIC $<TARGET_OBJECTS:gtkqt_objects>)
 target_include_directories(gtk-made-qt PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/gtk-made-qt>)
-target_link_libraries(gtk-made-qt PUBLIC PkgConfig::GLIB PkgConfig::CAIRO Qt::Widgets Qt::PrintSupport)
+target_link_libraries(gtk-made-qt PUBLIC PkgConfig::GLIB PkgConfig::CAIRO Qt::Widgets Qt::PrintSupport ${GTKQT_UCONTEXT_LIB})
 set_target_properties(gtk-made-qt PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
 if(GTKQT_BUILD_SHARED)
     gtkqt_objects(gtkqt_objects_shared GTKQT_EXPORT_API)
     add_library(gtk-made-qt-shared SHARED $<TARGET_OBJECTS:gtkqt_objects_shared>)
     target_include_directories(gtk-made-qt-shared PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
-    target_link_libraries(gtk-made-qt-shared PUBLIC PkgConfig::GLIB PkgConfig::CAIRO Qt::Widgets Qt::PrintSupport)
+    target_link_libraries(gtk-made-qt-shared PUBLIC PkgConfig::GLIB PkgConfig::CAIRO Qt::Widgets Qt::PrintSupport ${GTKQT_UCONTEXT_LIB})
     set_target_properties(gtk-made-qt-shared PROPERTIES OUTPUT_NAME gtk-made-qt VERSION ${PROJECT_VERSION} SOVERSION 0
         LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
 endif()
@@ -101,7 +139,7 @@ function(gtkqt_link_script file archive qtlibs)
     file(GENERATE OUTPUT ${file} CONTENT
 "/* GNU ld script: GTK made Qt (the GTK API on Qt). */
 GROUP ( ${archive} )
-INPUT ( ${qtlibs} -lstdc++ -lm )
+INPUT ( ${qtlibs} ${GTKQT_CXX_RUNTIME} -lm ${GTKQT_UCONTEXT_LIB} )
 ")
 endfunction()
 set(GTKQT_BUILD_QT "$<TARGET_LINKER_FILE:Qt${GTKQT_QT_MAJOR}::PrintSupport> $<TARGET_LINKER_FILE:Qt${GTKQT_QT_MAJOR}::Widgets> $<TARGET_LINKER_FILE:Qt${GTKQT_QT_MAJOR}::Gui> $<TARGET_LINKER_FILE:Qt${GTKQT_QT_MAJOR}::Core>")
@@ -198,7 +236,8 @@ if(GTKQT_BUILD_SHARED)
     endforeach()
     foreach(n ${GTKQT_LINK_NAMES})
         file(CREATE_LINK ../libgtk-made-qt.so ${CMAKE_CURRENT_BINARY_DIR}/lib/shared/lib${n}.so SYMBOLIC)
-        file(CREATE_LINK ${CMAKE_INSTALL_FULL_LIBDIR}/libgtk-made-qt.so.0 ${GTKQT_STAGE}/shared/lib${n}.so SYMBOLIC)
+        # relative: <libdir>/gtk-made-qt/shared -> <libdir> (packagers want no absolute links)
+        file(CREATE_LINK ../../libgtk-made-qt.so.0 ${GTKQT_STAGE}/shared/lib${n}.so SYMBOLIC)
     endforeach()
     foreach(script gtk-config glib-config)
         set(GTKQT_CONFIG_PCDIR ${CMAKE_CURRENT_BINARY_DIR}/lib/shared/pkgconfig)

@@ -541,6 +541,7 @@ QObject *gtkqt_file_dialog_create (GtkWidget *w)
 }
 
 G_DEFINE_TYPE (GtkFileChooserDialog, gtk_file_chooser_dialog, GTK_TYPE_DIALOG)
+G_DEFINE_TYPE (GtkFileChooserButton, gtk_file_chooser_button, GTK_TYPE_HBOX)
 static void gtk_file_chooser_dialog_init (GtkFileChooserDialog *) {}
 static void gtk_file_chooser_dialog_class_init (GtkFileChooserDialogClass *klass)
 {
@@ -566,10 +567,97 @@ static void gtk_native_dialog_class_init (GtkNativeDialogClass *klass)
   g_signal_new ("response", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 1, G_TYPE_INT);
 }
 
+/* ----------------------------------------------------------------------
+ * GtkFileChooserButton: a QPushButton naming the file; clicking runs the
+ * GtkFileChooserDialog it owns. The chosen path is the button's own, so
+ * a folder button reports the folder it was given before anything is
+ * picked, as GTK's does.
+ * ---------------------------------------------------------------------- */
+static GtkWidget *button_dialog (GObject *o)
+{
+  return (GtkWidget *) g_object_get_data (o, "gtkqt-chooser-dialog");
+}
+
+static void button_update (GtkWidget *b)
+{
+  auto *path = (const gchar *) g_object_get_data (G_OBJECT (b), "gtkqt-chooser-path");
+  QWidget *qw = gtkqt_qw (b);
+  auto *pb = qw ? qw->findChild<QPushButton *> () : nullptr;
+  if (!pb) return;
+  GtkWidget *d = button_dialog (G_OBJECT (b));
+  auto *fd = d ? gtkqt_q<QFileDialog> (d) : nullptr;
+  bool folder = fd && fd->fileMode () == QFileDialog::Directory;
+  QFileInfo fi (gtkqt_str (path));
+  pb->setText (path && *path ? (fi.fileName ().isEmpty () ? fi.absoluteFilePath () : fi.fileName ()) : QObject::tr ("(None)"));
+  pb->setIcon (qw->style ()->standardIcon (folder ? QStyle::SP_DirIcon : QStyle::SP_FileIcon));
+  pb->setToolTip (gtkqt_str (path));
+}
+
+static void button_set_path (GtkWidget *b, const gchar *path, bool emit)
+{
+  g_object_set_data_full (G_OBJECT (b), "gtkqt-chooser-path", g_strdup (path), g_free);
+  button_update (b);
+  if (emit) {
+    g_signal_emit_by_name (b, "selection-changed");
+    g_signal_emit_by_name (b, "file-set");
+  }
+}
+
+static QObject *file_button_create (GtkWidget *w)
+{
+  auto *qw = new QWidget;
+  auto *l = new QHBoxLayout (qw);
+  l->setContentsMargins (0, 0, 0, 0);
+  auto *pb = new QPushButton (qw);
+  pb->setStyleSheet ("text-align: left; padding: 3px 6px");
+  l->addWidget (pb);
+  gtkqt_connect (w, pb, &QPushButton::clicked, [] (GtkWidget *b, bool) {
+    GtkWidget *d = button_dialog (G_OBJECT (b));
+    auto *fd = d ? gtkqt_q<QFileDialog> (d) : nullptr;
+    if (!fd) return;
+    auto *path = (const gchar *) g_object_get_data (G_OBJECT (b), "gtkqt-chooser-path");
+    if (path && *path) {
+      if (fd->fileMode () == QFileDialog::Directory) fd->setDirectory (gtkqt_str (path));
+      else fd->selectFile (gtkqt_str (path));
+    }
+    fd->setWindowModality (Qt::ApplicationModal);
+    if (fd->exec () == QDialog::Accepted && !fd->selectedFiles ().isEmpty ())
+      button_set_path (b, fd->selectedFiles ().first ().toUtf8 ().constData (), true);
+  });
+  return qw;
+}
+
+static void file_button_dispose (GObject *o)
+{
+  if (GtkWidget *d = button_dialog (o)) {
+    g_object_set_data (o, "gtkqt-chooser-dialog", nullptr);
+    gtk_widget_destroy (d);
+    g_object_unref (d);
+  }
+  G_OBJECT_CLASS (gtk_file_chooser_button_parent_class)->dispose (o);
+}
+
+static void gtk_file_chooser_button_init (GtkFileChooserButton *) {}
+static void gtk_file_chooser_button_class_init (GtkFileChooserButtonClass *klass)
+{
+  G_OBJECT_CLASS (klass)->dispose = file_button_dispose;
+  gtkqt_set_create (GTK_WIDGET_CLASS (klass), file_button_create);
+  GType t = G_TYPE_FROM_CLASS (klass);
+  g_signal_new ("file-set", t, G_SIGNAL_RUN_FIRST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
+  g_signal_new ("selection-changed", t, G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
+  g_signal_new ("current-folder-changed", t, G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
+}
+
+static bool is_file_button (GtkFileChooser *c)
+{
+  return c && G_TYPE_CHECK_INSTANCE_TYPE (c, gtk_file_chooser_button_get_type ());
+}
+
 static QFileDialog *chooser (GtkFileChooser *c)
 {
   GObject *o = G_OBJECT (c);
   if (G_TYPE_CHECK_INSTANCE_TYPE (o, gtk_native_dialog_get_type ())) o = (GObject *) ((GtkNativeDialog *) o)->priv;
+  else if (is_file_button (c)) o = (GObject *) button_dialog (o);
   return o ? gtkqt_q<QFileDialog> (GTK_WIDGET (o)) : nullptr;
 }
 
@@ -586,6 +674,41 @@ GtkWidget *gtk_file_chooser_dialog_new (const gchar *title, GtkWindow *parent, G
   add_buttons_valist (GTK_DIALOG (d), first_button_text, ap);
   va_end (ap);
   return d;
+}
+
+GtkWidget *gtk_file_chooser_button_new_with_dialog (GtkWidget *dialog)
+{
+  GtkWidget *b = (GtkWidget *) g_object_new (GTK_TYPE_FILE_CHOOSER_BUTTON, nullptr);
+  g_object_set_data (G_OBJECT (b), "gtkqt-chooser-dialog", g_object_ref_sink (dialog));
+  button_update (b);
+  return b;
+}
+
+GtkWidget *gtk_file_chooser_button_new (const gchar *title, GtkFileChooserAction action)
+{
+  GtkWidget *d = gtk_file_chooser_dialog_new (title, nullptr, action, nullptr, nullptr);
+  return gtk_file_chooser_button_new_with_dialog (d);
+}
+
+void gtk_file_chooser_button_set_title (GtkFileChooserButton *b, const gchar *title)
+{
+  if (GtkWidget *d = button_dialog (G_OBJECT (b))) gtk_window_set_title (GTK_WINDOW (d), title);
+}
+const gchar *gtk_file_chooser_button_get_title (GtkFileChooserButton *b)
+{
+  GtkWidget *d = button_dialog (G_OBJECT (b));
+  return d ? gtk_window_get_title (GTK_WINDOW (d)) : nullptr;
+}
+void gtk_file_chooser_button_set_width_chars (GtkFileChooserButton *b, gint n)
+{
+  g_object_set_data (G_OBJECT (b), "gtkqt-width-chars", GINT_TO_POINTER (n));
+  QWidget *qw = gtkqt_qw (GTK_WIDGET (b));
+  if (auto *pb = qw ? qw->findChild<QPushButton *> () : nullptr)
+    pb->setMinimumWidth (n > 0 ? pb->fontMetrics ().averageCharWidth () * n + 32 : 0);
+}
+gint gtk_file_chooser_button_get_width_chars (GtkFileChooserButton *b)
+{
+  return GPOINTER_TO_INT (g_object_get_data (G_OBJECT (b), "gtkqt-width-chars"));
 }
 
 void gtk_file_chooser_set_action (GtkFileChooser *c, GtkFileChooserAction action)
@@ -622,8 +745,20 @@ void gtk_file_chooser_set_do_overwrite_confirmation (GtkFileChooser *c, gboolean
 }
 
 void gtk_file_chooser_set_current_name (GtkFileChooser *c, const gchar *name) { if (QFileDialog *fd = chooser (c)) fd->selectFile (gtkqt_str (name)); }
-gboolean gtk_file_chooser_set_filename (GtkFileChooser *c, const char *filename) { if (QFileDialog *fd = chooser (c)) fd->selectFile (gtkqt_str (filename)); return TRUE; }
-gboolean gtk_file_chooser_set_current_folder (GtkFileChooser *c, const gchar *filename) { if (QFileDialog *fd = chooser (c)) fd->setDirectory (gtkqt_str (filename)); return TRUE; }
+gboolean gtk_file_chooser_set_filename (GtkFileChooser *c, const char *filename)
+{
+  if (is_file_button (c)) button_set_path (GTK_WIDGET (c), filename, false);
+  if (QFileDialog *fd = chooser (c)) fd->selectFile (gtkqt_str (filename));
+  return TRUE;
+}
+gboolean gtk_file_chooser_set_current_folder (GtkFileChooser *c, const gchar *filename)
+{
+  QFileDialog *fd = chooser (c);
+  if (fd) fd->setDirectory (gtkqt_str (filename));
+  /* a folder button shows (and reports) the folder it is opened on */
+  if (is_file_button (c) && fd && fd->fileMode () == QFileDialog::Directory) button_set_path (GTK_WIDGET (c), filename, false);
+  return TRUE;
+}
 
 gboolean gtk_file_chooser_set_current_folder_file (GtkFileChooser *c, GFile *file, GError **)
 {
@@ -643,6 +778,10 @@ gboolean gtk_file_chooser_set_file (GtkFileChooser *c, GFile *file, GError **)
 
 gchar *gtk_file_chooser_get_filename (GtkFileChooser *c)
 {
+  if (is_file_button (c)) {
+    auto *path = (const gchar *) g_object_get_data (G_OBJECT (c), "gtkqt-chooser-path");
+    return path && *path ? g_strdup (path) : nullptr;
+  }
   QFileDialog *fd = chooser (c);
   QStringList f = fd ? fd->selectedFiles () : QStringList ();
   return f.isEmpty () ? nullptr : g_strdup (f.first ().toUtf8 ().constData ());
@@ -651,6 +790,10 @@ gchar *gtk_file_chooser_get_filename (GtkFileChooser *c)
 GSList *gtk_file_chooser_get_filenames (GtkFileChooser *c)
 {
   GSList *l = nullptr;
+  if (is_file_button (c)) {
+    gchar *f = gtk_file_chooser_get_filename (c);
+    return f ? g_slist_append (l, f) : l;
+  }
   if (QFileDialog *fd = chooser (c))
     for (const QString &f : fd->selectedFiles ()) l = g_slist_append (l, g_strdup (f.toUtf8 ().constData ()));
   return l;
@@ -666,6 +809,14 @@ gchar *gtk_file_chooser_get_uri (GtkFileChooser *c)
 
 gchar *gtk_file_chooser_get_current_folder (GtkFileChooser *c)
 {
+  if (is_file_button (c)) {
+    QFileDialog *fd = chooser (c);
+    auto *path = (const gchar *) g_object_get_data (G_OBJECT (c), "gtkqt-chooser-path");
+    if (path && *path) {
+      if (fd && fd->fileMode () == QFileDialog::Directory) return g_strdup (path);
+      return g_path_get_dirname (path);
+    }
+  }
   QFileDialog *fd = chooser (c);
   return fd ? g_strdup (fd->directory ().absolutePath ().toUtf8 ().constData ()) : nullptr;
 }

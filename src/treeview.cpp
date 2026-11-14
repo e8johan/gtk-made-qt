@@ -1060,7 +1060,9 @@ static void view_apply_columns (GtkWidget *w)
   if (d->adapter) d->adapter->reset ();
   QHeaderView *h = tv->header ();
   bool any_expand = false;
-  for (int i = 0; i < d->columns.size (); i++) {
+  /* before a model is set the header has no sections to configure */
+  int n = qMin ((int) d->columns.size (), h->count ());
+  for (int i = 0; i < n; i++) {
     ColumnData *c = cd (d->columns[i]);
     tv->setColumnHidden (i, !c->visible);
     if (c->fixed_width > 0) tv->setColumnWidth (i, c->fixed_width);
@@ -1076,13 +1078,13 @@ static void view_apply_columns (GtkWidget *w)
     gint col;
     GtkSortType order;
     if (gtk_tree_sortable_get_sort_column_id ((GtkTreeSortable *) d->model, &col, &order))
-      for (int i = 0; i < d->columns.size (); i++)
+      for (int i = 0; i < n; i++)
         if (cd (d->columns[i])->sort_column_id == col) {
           h->setSortIndicatorShown (true);
           h->setSortIndicator (i, order == GTK_SORT_ASCENDING ? Qt::AscendingOrder : Qt::DescendingOrder);
         }
   }
-  for (int i = 0; i < d->columns.size (); i++)
+  for (int i = 0; i < n; i++)
     if (cd (d->columns[i])->min_width > 0 && tv->columnWidth (i) < cd (d->columns[i])->min_width)
       tv->setColumnWidth (i, cd (d->columns[i])->min_width);
 }
@@ -1550,5 +1552,316 @@ void gtk_combo_box_set_entry_text_column (GtkComboBox *combo, gint text_column)
 }
 
 void gtk_combo_box_set_id_column (GtkComboBox *, gint) {}
+
+} /* extern "C" */
+
+/* ======================================================================
+ * GtkEntryCompletion
+ *
+ * GTK's matching rules (minimum key length, case-insensitive prefix or the
+ * program's match function) pick rows of any GtkTreeModel; the matches are
+ * shown by a QCompleter popup in unfiltered mode, so Qt only displays and
+ * navigates them. Choosing one emits match-selected, whose default handler
+ * puts the row's text in the entry, so programs can take over as in GTK.
+ * ====================================================================== */
+struct _GtkEntryCompletion {
+  GObject parent;
+  GtkTreeModel *model;
+  GtkWidget *entry;                      /* weak */
+  gint text_column, minimum_key_length;
+  gboolean inline_completion, inline_selection, popup_completion, popup_set_width, popup_single_match;
+  GtkEntryCompletionMatchFunc match_func;
+  gpointer match_data;
+  GDestroyNotify match_notify;
+  gchar *prefix;                         /* the key of the last completion */
+  QPointer<QCompleter> *completer;
+  QStringList *texts;                    /* the matches shown, and their rows */
+  QStringList *paths;
+};
+typedef struct { GObjectClass parent_class; } GtkEntryCompletionClass;
+
+G_DEFINE_TYPE (GtkEntryCompletion, gtk_entry_completion, G_TYPE_OBJECT)
+
+static void completion_init_fields (GtkEntryCompletion *c)
+{
+  c->text_column = -1;
+  c->minimum_key_length = 1;
+  c->popup_completion = c->popup_set_width = c->popup_single_match = TRUE;
+  c->completer = new QPointer<QCompleter>;
+  c->texts = new QStringList;
+  c->paths = new QStringList;
+}
+static void gtk_entry_completion_init (GtkEntryCompletion *c) { completion_init_fields (c); }
+
+static void completion_detach (GtkEntryCompletion *c)
+{
+  if (*c->completer) {
+    QCompleter *q = *c->completer;
+    if (QAbstractItemView *p = q->popup ()) p->hide ();
+    q->deleteLater ();
+  }
+  *c->completer = nullptr;
+  if (c->entry) g_object_remove_weak_pointer (G_OBJECT (c->entry), (gpointer *) &c->entry);
+  c->entry = nullptr;
+}
+
+static void completion_finalize (GObject *o)
+{
+  GtkEntryCompletion *c = GTK_ENTRY_COMPLETION (o);
+  completion_detach (c);
+  if (c->model) g_object_unref (c->model);
+  if (c->match_notify) c->match_notify (c->match_data);
+  g_free (c->prefix);
+  delete c->completer;
+  delete c->texts;
+  delete c->paths;
+  G_OBJECT_CLASS (gtk_entry_completion_parent_class)->finalize (o);
+}
+
+static gchar *completion_row_text (GtkEntryCompletion *c, GtkTreeIter *it)
+{
+  if (c->text_column < 0) return nullptr;
+  gchar *s = nullptr;
+  GValue v = G_VALUE_INIT;
+  gtk_tree_model_get_value (c->model, it, c->text_column, &v);
+  if (G_VALUE_HOLDS_STRING (&v)) s = g_value_dup_string (&v);
+  g_value_unset (&v);
+  return s;
+}
+
+static gboolean completion_default_match (GtkEntryCompletion *c, const gchar *key, GtkTreeIter *it)
+{
+  gchar *text = completion_row_text (c, it);
+  if (!text) return FALSE;
+  QString t = QString::fromUtf8 (text).normalized (QString::NormalizationForm_D);
+  g_free (text);
+  return t.startsWith (QString::fromUtf8 (key).normalized (QString::NormalizationForm_D), Qt::CaseInsensitive);
+}
+
+/* fills texts/paths with the rows that match key */
+static void completion_collect (GtkEntryCompletion *c, const gchar *key)
+{
+  c->texts->clear ();
+  c->paths->clear ();
+  if (!c->model) return;
+  GtkTreeIter it;
+  if (!gtk_tree_model_get_iter_first (c->model, &it)) return;
+  do {
+    gboolean ok = c->match_func ? c->match_func (c, key, &it, c->match_data) : completion_default_match (c, key, &it);
+    if (!ok) continue;
+    gchar *text = completion_row_text (c, &it);
+    gchar *path = gtk_tree_model_get_string_from_iter (c->model, &it);
+    *c->texts << QString::fromUtf8 (text ? text : "");
+    *c->paths << QString::fromUtf8 (path);
+    g_free (text);
+    g_free (path);
+  } while (gtk_tree_model_iter_next (c->model, &it));
+}
+
+static QLineEdit *completion_line (GtkEntryCompletion *c)
+{
+  return c->entry ? gtkqt_q<QLineEdit> (c->entry) : nullptr;
+}
+
+static void completion_choose (GtkEntryCompletion *c, int row)
+{
+  if (!c->model || row < 0 || row >= c->paths->size ()) return;
+  GtkTreeIter it;
+  if (!gtk_tree_model_get_iter_from_string (c->model, &it, c->paths->at (row).toUtf8 ().constData ())) return;
+  gboolean handled = FALSE;
+  g_signal_emit_by_name (c, "match-selected", c->model, &it, &handled);
+}
+
+static void completion_run (GtkEntryCompletion *c)
+{
+  QLineEdit *line = completion_line (c);
+  if (!line) return;
+  QByteArray key = line->text ().toUtf8 ();
+  if (g_utf8_strlen (key.constData (), -1) < c->minimum_key_length) {
+    if (*c->completer && (*c->completer)->popup ()) (*c->completer)->popup ()->hide ();
+    return;
+  }
+  g_free (c->prefix);
+  c->prefix = g_strdup (key.constData ());
+  completion_collect (c, key.constData ());
+  if (c->texts->isEmpty ()) {
+    g_signal_emit_by_name (c, "no-matches");
+    if (*c->completer && (*c->completer)->popup ()) (*c->completer)->popup ()->hide ();
+    return;
+  }
+  if (c->inline_completion) gtk_entry_completion_insert_prefix (c);
+  if (!c->popup_completion) return;
+  if (c->texts->size () == 1 && !c->popup_single_match) return;
+  if (!*c->completer) {
+    QCompleter *q = new QCompleter (line);
+    q->setWidget (line);
+    q->setCompletionMode (QCompleter::UnfilteredPopupCompletion);
+    q->setModel (new QStringListModel (q));
+    QObject::connect (q, QOverload<const QModelIndex &>::of (&QCompleter::activated), q, [c] (const QModelIndex &i) {
+      GtkQtEmitGuard guard;
+      completion_choose (c, i.row ());
+    });
+    *c->completer = q;
+  }
+  QCompleter *q = *c->completer;
+  static_cast<QStringListModel *> (q->model ())->setStringList (*c->texts);
+  q->complete (c->popup_set_width ? QRect () : QRect (0, 0, q->popup ()->sizeHintForColumn (0) + 24, line->height ()));
+}
+
+static gboolean completion_real_match_selected (GtkEntryCompletion *c, GtkTreeModel *, GtkTreeIter *it)
+{
+  if (!c->entry) return FALSE;
+  gchar *text = completion_row_text (c, it);
+  if (!text) return FALSE;
+  gtk_entry_set_text (GTK_ENTRY (c->entry), text);
+  gtk_editable_set_position (GTK_EDITABLE (c->entry), -1);
+  g_free (text);
+  return TRUE;
+}
+
+/* inserts the part of prefix past what was typed, selected, as GTK does */
+static gboolean completion_real_insert_prefix (GtkEntryCompletion *c, const gchar *prefix)
+{
+  QLineEdit *line = completion_line (c);
+  if (!line || !prefix) return FALSE;
+  QString typed = line->text (), full = QString::fromUtf8 (prefix);
+  if (full.size () <= typed.size () || !full.startsWith (typed, Qt::CaseInsensitive)) return FALSE;
+  int pos = typed.size ();
+  QByteArray rest = full.mid (pos).toUtf8 ();
+  gint p = pos;
+  gtk_editable_insert_text (GTK_EDITABLE (c->entry), rest.constData (), -1, &p);
+  gtk_editable_select_region (GTK_EDITABLE (c->entry), pos, p);
+  return TRUE;
+}
+
+static void gtk_entry_completion_class_init (GtkEntryCompletionClass *klass)
+{
+  G_OBJECT_CLASS (klass)->finalize = completion_finalize;
+  GType t = G_TYPE_FROM_CLASS (klass);
+  g_signal_new_class_handler ("match-selected", t, G_SIGNAL_RUN_LAST, G_CALLBACK (completion_real_match_selected),
+                              g_signal_accumulator_true_handled, nullptr, nullptr,
+                              G_TYPE_BOOLEAN, 2, GTK_TYPE_TREE_MODEL, G_TYPE_POINTER);
+  g_signal_new_class_handler ("insert-prefix", t, G_SIGNAL_RUN_LAST, G_CALLBACK (completion_real_insert_prefix),
+                              g_signal_accumulator_true_handled, nullptr, nullptr, G_TYPE_BOOLEAN, 1, G_TYPE_STRING);
+  g_signal_new ("cursor-on-match", t, G_SIGNAL_RUN_LAST, 0, g_signal_accumulator_true_handled, nullptr, nullptr,
+                G_TYPE_BOOLEAN, 2, GTK_TYPE_TREE_MODEL, G_TYPE_POINTER);
+  g_signal_new ("action-activated", t, G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 1, G_TYPE_INT);
+  g_signal_new ("no-matches", t, G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
+  gtkqt_prop (klass, g_param_spec_object ("model", nullptr, nullptr, GTK_TYPE_TREE_MODEL, RW),
+              [] (GObject *o, const GValue *v) { gtk_entry_completion_set_model (GTK_ENTRY_COMPLETION (o), (GtkTreeModel *) g_value_get_object (v)); },
+              [] (GObject *o, GValue *v) { g_value_set_object (v, GTK_ENTRY_COMPLETION (o)->model); });
+  gtkqt_prop (klass, g_param_spec_int ("text-column", nullptr, nullptr, -1, G_MAXINT, -1, RW),
+              [] (GObject *o, const GValue *v) { gtk_entry_completion_set_text_column (GTK_ENTRY_COMPLETION (o), g_value_get_int (v)); },
+              [] (GObject *o, GValue *v) { g_value_set_int (v, GTK_ENTRY_COMPLETION (o)->text_column); });
+  gtkqt_prop (klass, g_param_spec_int ("minimum-key-length", nullptr, nullptr, 0, G_MAXINT, 1, RW),
+              [] (GObject *o, const GValue *v) { GTK_ENTRY_COMPLETION (o)->minimum_key_length = g_value_get_int (v); },
+              [] (GObject *o, GValue *v) { g_value_set_int (v, GTK_ENTRY_COMPLETION (o)->minimum_key_length); });
+  gtkqt_prop (klass, g_param_spec_boolean ("inline-completion", nullptr, nullptr, FALSE, RW),
+              [] (GObject *o, const GValue *v) { GTK_ENTRY_COMPLETION (o)->inline_completion = g_value_get_boolean (v); },
+              [] (GObject *o, GValue *v) { g_value_set_boolean (v, GTK_ENTRY_COMPLETION (o)->inline_completion); });
+  gtkqt_prop (klass, g_param_spec_boolean ("popup-completion", nullptr, nullptr, TRUE, RW),
+              [] (GObject *o, const GValue *v) { GTK_ENTRY_COMPLETION (o)->popup_completion = g_value_get_boolean (v); },
+              [] (GObject *o, GValue *v) { g_value_set_boolean (v, GTK_ENTRY_COMPLETION (o)->popup_completion); });
+}
+
+extern "C" {
+
+GtkEntryCompletion *gtk_entry_completion_new (void) { return (GtkEntryCompletion *) g_object_new (GTK_TYPE_ENTRY_COMPLETION, nullptr); }
+GtkWidget *gtk_entry_completion_get_entry (GtkEntryCompletion *c) { return c->entry; }
+
+void gtk_entry_completion_set_model (GtkEntryCompletion *c, GtkTreeModel *model)
+{
+  if (model) g_object_ref (model);
+  if (c->model) g_object_unref (c->model);
+  c->model = model;
+  /* GTK picks the first string column once a model is there */
+  if (model && c->text_column < 0)
+    for (gint i = 0; i < gtk_tree_model_get_n_columns (model); i++)
+      if (gtk_tree_model_get_column_type (model, i) == G_TYPE_STRING) { c->text_column = i; break; }
+}
+GtkTreeModel *gtk_entry_completion_get_model (GtkEntryCompletion *c) { return c->model; }
+
+void gtk_entry_completion_set_match_func (GtkEntryCompletion *c, GtkEntryCompletionMatchFunc func, gpointer data, GDestroyNotify notify)
+{
+  if (c->match_notify) c->match_notify (c->match_data);
+  c->match_func = func;
+  c->match_data = data;
+  c->match_notify = notify;
+}
+void gtk_entry_completion_set_minimum_key_length (GtkEntryCompletion *c, gint length) { c->minimum_key_length = MAX (0, length); }
+gint gtk_entry_completion_get_minimum_key_length (GtkEntryCompletion *c) { return c->minimum_key_length; }
+void gtk_entry_completion_complete (GtkEntryCompletion *c) { completion_run (c); }
+
+void gtk_entry_completion_insert_prefix (GtkEntryCompletion *c)
+{
+  gchar *prefix = gtk_entry_completion_compute_prefix (c, c->prefix ? c->prefix : "");
+  gboolean handled = FALSE;
+  if (prefix) g_signal_emit_by_name (c, "insert-prefix", prefix, &handled);
+  g_free (prefix);
+}
+
+/* the longest common prefix of the matches for key */
+gchar *gtk_entry_completion_compute_prefix (GtkEntryCompletion *c, const char *key)
+{
+  completion_collect (c, key ? key : "");
+  if (c->texts->isEmpty ()) return nullptr;
+  QString p = c->texts->first ();
+  for (const QString &t : *c->texts) {
+    int n = 0;
+    while (n < p.size () && n < t.size () && p[n] == t[n]) n++;
+    p.truncate (n);
+  }
+  return g_strdup (p.toUtf8 ().constData ());
+}
+
+void gtk_entry_completion_set_text_column (GtkEntryCompletion *c, gint column) { c->text_column = column; }
+gint gtk_entry_completion_get_text_column (GtkEntryCompletion *c) { return c->text_column; }
+void gtk_entry_completion_set_inline_completion (GtkEntryCompletion *c, gboolean v) { c->inline_completion = v; }
+gboolean gtk_entry_completion_get_inline_completion (GtkEntryCompletion *c) { return c->inline_completion; }
+void gtk_entry_completion_set_inline_selection (GtkEntryCompletion *c, gboolean v) { c->inline_selection = v; }
+gboolean gtk_entry_completion_get_inline_selection (GtkEntryCompletion *c) { return c->inline_selection; }
+void gtk_entry_completion_set_popup_completion (GtkEntryCompletion *c, gboolean v) { c->popup_completion = v; }
+gboolean gtk_entry_completion_get_popup_completion (GtkEntryCompletion *c) { return c->popup_completion; }
+void gtk_entry_completion_set_popup_set_width (GtkEntryCompletion *c, gboolean v) { c->popup_set_width = v; }
+gboolean gtk_entry_completion_get_popup_set_width (GtkEntryCompletion *c) { return c->popup_set_width; }
+void gtk_entry_completion_set_popup_single_match (GtkEntryCompletion *c, gboolean v) { c->popup_single_match = v; }
+gboolean gtk_entry_completion_get_popup_single_match (GtkEntryCompletion *c) { return c->popup_single_match; }
+const gchar *gtk_entry_completion_get_completion_prefix (GtkEntryCompletion *c) { return c->prefix; }
+
+static void entry_completion_unset (gpointer data)
+{
+  GtkEntryCompletion *c = (GtkEntryCompletion *) data;
+  completion_detach (c);
+  g_object_unref (c);
+}
+
+void gtk_entry_set_completion (GtkEntry *entry, GtkEntryCompletion *completion)
+{
+  if (!GTK_IS_ENTRY (entry)) return;
+  /* drops (and detaches) the previous one */
+  g_object_set_data_full (G_OBJECT (entry), "gtkqt-completion", nullptr, nullptr);
+  if (!completion) return;
+  g_object_ref (completion);
+  completion_detach (completion);
+  completion->entry = GTK_WIDGET (entry);
+  g_object_add_weak_pointer (G_OBJECT (entry), (gpointer *) &completion->entry);
+  g_object_set_data_full (G_OBJECT (entry), "gtkqt-completion", completion, entry_completion_unset);
+  /* typing (not set_text from the program) runs the completion */
+  QLineEdit *line = gtkqt_q<QLineEdit> (GTK_WIDGET (entry));
+  if (line && !line->property ("_gtkqt_completion").toBool ()) {
+    line->setProperty ("_gtkqt_completion", true);
+    QObject::connect (line, &QLineEdit::textEdited, line, [entry] (const QString &) {
+      auto *c = (GtkEntryCompletion *) g_object_get_data (G_OBJECT (entry), "gtkqt-completion");
+      if (!c) return;
+      GtkQtEmitGuard guard;
+      completion_run (c);
+    });
+  }
+}
+
+GtkEntryCompletion *gtk_entry_get_completion (GtkEntry *entry)
+{
+  return GTK_IS_ENTRY (entry) ? (GtkEntryCompletion *) g_object_get_data (G_OBJECT (entry), "gtkqt-completion") : nullptr;
+}
 
 } /* extern "C" */

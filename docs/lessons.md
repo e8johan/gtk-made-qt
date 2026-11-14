@@ -22,6 +22,20 @@ Things that cost time once; check here before debugging something similar.
 - `gtk-xft-dpi` is DPI * 1024; programs divide by it.
 - Print contexts work in points (72 dpi) with the origin at the margin;
   programs draw headers at negative y.
+- GTK 2 programs update widgets from worker threads under
+  `gdk_threads_enter()` (Asunder's disc polling and ripping threads). A
+  no-op lock lets Qt lay out a label while the worker changes it (crash in
+  QLabel); a real mutex is not enough either, as Qt then queues the model
+  signals the worker emits. The section has to run on the GUI thread (see
+  architecture.md, Threads).
+- Glade 2 code builds frames with a check button as the label widget, adds
+  notebook pages before `gtk_notebook_set_tab_label`, and packs an
+  alignment into a button before filling it: sizes must follow later
+  changes, not be computed when the child is added.
+- A tree view gets its columns before its model; Qt's header has no
+  sections until then.
+- An icon missing from the theme must leave an empty space (GTK's
+  missing-image), not text.
 
 ## GTK 1.2
 
@@ -60,6 +74,15 @@ Things that cost time once; check here before debugging something similar.
 - An explicit window position (`gtk_widget_set_uposition`) wins over
   centering on the transient parent.
 - A GTK notebook asks for the width of all its tabs unless scrollable.
+- GTK 1.2's types were looser than GTK 2's, and old code relies on it:
+  `GtkSignalFunc` and `GtkItemFactoryCallback` were unprototyped
+  (`void (*)()`), `GdkAtom` was a `gulong` (the same as X's `Atom`) and
+  `GDK_NONE` was `0L`, also passed as "no window". Declared the GTK 2 way,
+  GCC 14 and clang 16 reject XMMS by the hundred (incompatible pointer
+  types, int conversion). At API level 1 the headers use GTK 1's types;
+  the GTK 1/2 connect, timeout and idle macros cast their callbacks.
+- C23 (GCC 15's default) has no unprototyped functions and makes `bool` a
+  keyword: build GTK 1 era programs with `-std=gnu17`.
 
 ## Xlib
 
@@ -92,3 +115,7 @@ Things that cost time once; check here before debugging something similar.
 - Programs include `gtk/gtktextiter.h` and other sub-headers directly.
 - Makefiles that do not depend on the archive are not relinked when the
   library changes: delete the program first.
+- Qt 6.11 refuses `findChild<T>` / `findChildren<T>` / `qobject_cast<T>`
+  for classes without Q_OBJECT; the library has no moc, so walk
+  `children()` with `dynamic_cast`. Found building in an Alpine root (GCC
+  15, Qt 6.11, musl), where the tests also pass.

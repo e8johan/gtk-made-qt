@@ -52,6 +52,20 @@ GtkFileSelection is built from GTK widgets as in GTK 1.2:
 
 ![XMMS file browser](docs/screenshots/xmms-filebrowser.png)
 
+[Asunder 3.0.1](http://littlesvr.ca/asunder/), a GTK 2 CD ripper written
+with Glade 2, unmodified. Its threads poll the drive, rip and encode, and
+update the window between `gdk_threads_enter()` and `gdk_threads_leave()`;
+those sections run on Qt's GUI thread (see docs/architecture.md). Entry
+completion for artist and album names is a QCompleter popup; the
+destination folder is a GtkFileChooserButton; the Encode page's frames
+have check buttons as their labels.
+
+| Asunder, real GTK 2 | Asunder, same source on GTK made Qt |
+| --- | --- |
+| ![Asunder on GTK 2](docs/screenshots/asunder-gtk2.png) | ![Asunder on Qt](docs/screenshots/asunder-qt.png) |
+
+![Asunder preferences](docs/screenshots/asunder-prefs.png)
+
 ## Quick start
 
 ```bash
