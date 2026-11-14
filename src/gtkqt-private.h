@@ -113,6 +113,14 @@ public:
   bool eventFilter (QObject *watched, QEvent *event) override;
 };
 
+/* GtkBuilder <accelerator>s waiting for their widget's toplevel window */
+void gtkqt_builder_pending_accel (GtkWidget *w, const QByteArray &signal, guint key, GdkModifierType mods);
+void gtkqt_builder_accels_retry (void);
+extern bool gtkqt_builder_accels_waiting;
+
+/* what an accelerator's QAction stands for (gtk_accel_group_find ...) */
+void gtkqt_accel_set_info (QAction *action, GClosure *closure, GtkAccelGroup *group, guint key, GdkModifierType mods);
+
 /* the GDK lock: a thread's sections between enter and leave run on the GUI thread */
 void gtkqt_threads_init (void);
 void gtkqt_threads_enter (void);
@@ -180,6 +188,7 @@ void gtkqt_prop (gpointer klass, GParamSpec *pspec, GtkQtPropSet set, GtkQtPropG
 /* ---------- events ---------- */
 gboolean gtkqt_emit_event (GtkWidget *widget, GdkEvent *event, const char *signal_name);
 guint    gtkqt_qt_key_to_keyval (int qt_key, const QString &text, Qt::KeyboardModifiers mods);
+int      gtkqt_keyval_to_qt_key (guint keyval);   /* keypad keys carry Qt::KeypadModifier */
 guint    gtkqt_qt_mods_to_gdk (Qt::KeyboardModifiers mods, Qt::MouseButtons buttons);
 void     gtkqt_controllers_dispatch (GtkWidget *widget, QEvent *event, bool *consumed);
 

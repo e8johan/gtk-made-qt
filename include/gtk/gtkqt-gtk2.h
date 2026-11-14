@@ -287,6 +287,37 @@ GtkAdjustment *gtk_scrolled_window_get_hadjustment (GtkScrolledWindow *scrolled_
 GtkAdjustment *gtk_scrolled_window_get_vadjustment (GtkScrolledWindow *scrolled_window);
 void           gtk_viewport_set_shadow_type (GtkViewport *viewport, GtkShadowType type);
 
+/* ---------- accelerator queries (keyboard shortcuts in tooltips ...) ---------- */
+typedef struct { guint accel_key; GdkModifierType accel_mods; guint accel_flags : 16; } GtkAccelKey;
+typedef gboolean (*GtkAccelGroupFindFunc) (GtkAccelKey *key, GClosure *closure, gpointer data);
+GtkAccelKey   *gtk_accel_group_find (GtkAccelGroup *accel_group, GtkAccelGroupFindFunc find_func, gpointer data);
+GtkAccelGroup *gtk_accel_group_from_accel_closure (GClosure *closure);
+GList         *gtk_widget_list_accel_closures (GtkWidget *widget);
+void           gtk_accelerator_set_default_mod_mask (GdkModifierType default_mod_mask);
+GdkModifierType gtk_accelerator_get_default_mod_mask (void);
+
+/* ---------- key snoopers (GTK 2): see every key event first ---------- */
+typedef gint (*GtkKeySnoopFunc) (GtkWidget *grab_widget, GdkEventKey *event, gpointer func_data);
+guint gtk_key_snooper_install (GtkKeySnoopFunc snooper, gpointer func_data);
+void  gtk_key_snooper_remove (guint snooper_handler_id);
+
+/* ---------- GtkBuildable: the id an object had in the builder file ---------- */
+typedef struct _GtkBuildable GtkBuildable;
+#define GTK_BUILDABLE(o) ((GtkBuildable *) (o))
+void         gtk_buildable_set_name (GtkBuildable *buildable, const gchar *name);
+const gchar *gtk_buildable_get_name (GtkBuildable *buildable);
+
+GdkAtom   gtk_selection_data_get_data_type (const GtkSelectionData *selection_data);
+gint      gtk_selection_data_get_format (const GtkSelectionData *selection_data);
+void      gtk_widget_get_pointer (GtkWidget *widget, gint *x, gint *y);
+void      gtk_widget_get_child_requisition (GtkWidget *widget, GtkRequisition *requisition);
+void      gtk_check_menu_item_toggled (GtkCheckMenuItem *check_menu_item);
+
+/* GTK 3.0-3.16 per-widget colours and fonts (the GTK 2 modify_* calls) */
+void       gtk_widget_override_font (GtkWidget *widget, const PangoFontDescription *font_desc);
+void       gtk_widget_override_color (GtkWidget *widget, GtkStateFlags state, const GdkRGBA *color);
+void       gtk_widget_override_background_color (GtkWidget *widget, GtkStateFlags state, const GdkRGBA *color);
+GdkDevice *gtk_get_current_event_device (void);
 G_END_DECLS
 
 #endif

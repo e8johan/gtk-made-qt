@@ -31,7 +31,7 @@ static void gtk_text_mark_finalize (GObject *o)
 }
 static void gtk_text_mark_class_init (GtkTextMarkClass *klass) { G_OBJECT_CLASS (klass)->finalize = gtk_text_mark_finalize; }
 
-struct _GtkTextTag { GObject parent_instance; gchar *name; gpointer format; };
+struct _GtkTextTag { GObject parent_instance; gchar *name; gpointer format; gpointer block; };
 typedef struct { GObjectClass parent_class; } GtkTextTagClass;
 G_DEFINE_TYPE (GtkTextTag, gtk_text_tag, G_TYPE_OBJECT)
 
@@ -41,12 +41,20 @@ static QTextCharFormat &tag_fmt (GtkTextTag *t)
   return *static_cast<QTextCharFormat *> (t->format);
 }
 
+/* paragraph properties (justification, margins ...) */
+static QTextBlockFormat &tag_block (GtkTextTag *t)
+{
+  if (!t->block) t->block = new QTextBlockFormat;
+  return *static_cast<QTextBlockFormat *> (t->block);
+}
+
 static void gtk_text_tag_init (GtkTextTag *) {}
 static void gtk_text_tag_finalize (GObject *o)
 {
   auto *t = (GtkTextTag *) o;
   g_free (t->name);
   delete static_cast<QTextCharFormat *> (t->format);
+  delete static_cast<QTextBlockFormat *> (t->block);
   G_OBJECT_CLASS (gtk_text_tag_parent_class)->finalize (o);
 }
 
@@ -94,6 +102,48 @@ static void gtk_text_tag_class_init (GtkTextTagClass *klass)
                 }
               }), nullptr);
   gtkqt_prop (klass, g_param_spec_boolean ("editable", nullptr, nullptr, TRUE, G_PARAM_WRITABLE), [] (GObject *, const GValue *) {}, nullptr);
+  /* the font as a whole: Pango's description */
+  gtkqt_prop (klass, g_param_spec_boxed ("font-desc", nullptr, nullptr, PANGO_TYPE_FONT_DESCRIPTION, RW),
+              TAG_SET ({
+                auto *desc = (const PangoFontDescription *) g_value_get_boxed (v);
+                if (!desc) return;
+                PangoFontMask set = pango_font_description_get_set_fields (desc);
+                QFont q = gtkqt_font_from_pango (desc);
+                if (set & PANGO_FONT_MASK_FAMILY) f.setFontFamilies ({ q.family () });
+                if (set & PANGO_FONT_MASK_SIZE) f.setFontPointSize (q.pointSizeF ());
+                if (set & PANGO_FONT_MASK_WEIGHT) f.setFontWeight (q.weight ());
+                if (set & PANGO_FONT_MASK_STYLE) f.setFontItalic (q.italic ());
+              }),
+              [] (GObject *o, GValue *v) {
+                QFont q = tag_fmt ((GtkTextTag *) o).font ();
+                PangoFontDescription *desc = gtkqt_pango_from_font (q);
+                g_value_take_boxed (v, desc);
+              });
+  /* paragraph properties */
+  gtkqt_prop (klass, g_param_spec_int ("justification", nullptr, nullptr, GTK_JUSTIFY_LEFT, GTK_JUSTIFY_FILL, GTK_JUSTIFY_LEFT, G_PARAM_WRITABLE),
+              [] (GObject *o, const GValue *v) {
+                static const Qt::Alignment map[] = { Qt::AlignLeft, Qt::AlignRight, Qt::AlignHCenter, Qt::AlignJustify };
+                tag_block ((GtkTextTag *) o).setAlignment (map[qBound (0, g_value_get_int (v), 3)]);
+              }, nullptr);
+  gtkqt_prop (klass, g_param_spec_int ("left-margin", nullptr, nullptr, 0, G_MAXINT, 0, G_PARAM_WRITABLE),
+              [] (GObject *o, const GValue *v) { tag_block ((GtkTextTag *) o).setLeftMargin (g_value_get_int (v)); }, nullptr);
+  gtkqt_prop (klass, g_param_spec_int ("right-margin", nullptr, nullptr, 0, G_MAXINT, 0, G_PARAM_WRITABLE),
+              [] (GObject *o, const GValue *v) { tag_block ((GtkTextTag *) o).setRightMargin (g_value_get_int (v)); }, nullptr);
+  gtkqt_prop (klass, g_param_spec_int ("indent", nullptr, nullptr, G_MININT, G_MAXINT, 0, G_PARAM_WRITABLE),
+              [] (GObject *o, const GValue *v) { tag_block ((GtkTextTag *) o).setTextIndent (g_value_get_int (v)); }, nullptr);
+  gtkqt_prop (klass, g_param_spec_int ("pixels-above-lines", nullptr, nullptr, 0, G_MAXINT, 0, G_PARAM_WRITABLE),
+              [] (GObject *o, const GValue *v) { tag_block ((GtkTextTag *) o).setTopMargin (g_value_get_int (v)); }, nullptr);
+  gtkqt_prop (klass, g_param_spec_int ("pixels-below-lines", nullptr, nullptr, 0, G_MAXINT, 0, G_PARAM_WRITABLE),
+              [] (GObject *o, const GValue *v) { tag_block ((GtkTextTag *) o).setBottomMargin (g_value_get_int (v)); }, nullptr);
+  gtkqt_prop (klass, g_param_spec_string ("language", nullptr, nullptr, nullptr, RW),
+              [] (GObject *o, const GValue *v) { g_object_set_data_full (o, "gtkqt-language", g_value_dup_string (v), g_free); },
+              [] (GObject *o, GValue *v) {
+                auto *lang = (const gchar *) g_object_get_data (o, "gtkqt-language");
+                g_value_set_string (v, lang ? lang : pango_language_to_string (pango_language_get_default ()));
+              });
+  /* wrapping is the view's in Qt, not a paragraph's */
+  gtkqt_prop (klass, g_param_spec_int ("wrap-mode", nullptr, nullptr, GTK_WRAP_NONE, GTK_WRAP_WORD_CHAR, GTK_WRAP_NONE, G_PARAM_WRITABLE),
+              [] (GObject *, const GValue *) {}, nullptr);
 }
 
 /* ======================================================================
@@ -267,7 +317,13 @@ GtkWidget *gtkqt_text_buffer_any_view (GtkTextBuffer *b)
 
 extern "C" {
 
-GtkTextBuffer *gtk_text_buffer_new (GtkTextTagTable *) { return (GtkTextBuffer *) g_object_new (GTK_TYPE_TEXT_BUFFER, nullptr); }
+static void buffer_take_table_tags (GtkTextBuffer *b, GtkTextTagTable *table);
+GtkTextBuffer *gtk_text_buffer_new (GtkTextTagTable *table)
+{
+  auto *b = (GtkTextBuffer *) g_object_new (GTK_TYPE_TEXT_BUFFER, nullptr);
+  if (table) buffer_take_table_tags (b, table);
+  return b;
+}
 gint gtk_text_buffer_get_line_count (GtkTextBuffer *b) { return bdoc (b)->blockCount (); }
 gint gtk_text_buffer_get_char_count (GtkTextBuffer *b) { return end_offset (b); }
 
@@ -530,6 +586,15 @@ static void real_remove_tag (GtkTextBuffer *b, GtkTextTag *tag, const GtkTextIte
   QTextCharFormat clear = c.charFormat ();
   for (int id : tf.properties ().keys ()) clear.clearProperty (id);
   c.setCharFormat (clear);
+  if (tag->block) {
+    QTextBlock last = bdoc (b)->findBlock (iter_off (end));
+    for (QTextBlock bl = bdoc (b)->findBlock (iter_off (start)); bl.isValid (); bl = bl.next ()) {
+      QTextBlockFormat bf = bl.blockFormat ();
+      for (int id : tag_block (tag).properties ().keys ()) bf.clearProperty (id);
+      QTextCursor (bl).setBlockFormat (bf);
+      if (bl == last) break;
+    }
+  }
 }
 
 void gtk_text_buffer_remove_tag (GtkTextBuffer *b, GtkTextTag *tag, const GtkTextIter *start, const GtkTextIter *end)
@@ -548,6 +613,7 @@ static void real_apply_tag (GtkTextBuffer *b, GtkTextTag *tag, const GtkTextIter
   c.setPosition (iter_off (start));
   c.setPosition (iter_off (end), QTextCursor::KeepAnchor);
   c.mergeCharFormat (tag_fmt (tag));
+  if (tag->block) c.mergeBlockFormat (tag_block (tag));
 }
 
 void gtk_text_buffer_apply_tag_by_name (GtkTextBuffer *b, const gchar *name, const GtkTextIter *start, const GtkTextIter *end)
@@ -1349,17 +1415,26 @@ GtkWidget *gtk_text_view_new_with_buffer (GtkTextBuffer *buffer) { return (GtkWi
 void gtk_text_view_set_buffer (GtkTextView *view, GtkTextBuffer *buffer)
 {
   auto *e = gtkqt_q<QTextEdit> (GTK_WIDGET (view));
-  if (GtkTextBuffer *old = view_buffer (view)) {
-    if (old == buffer) return;
+  /* the old buffer is released only once the view shows another document:
+   * its QTextDocument goes with it */
+  GtkTextBuffer *old = view_buffer (view);
+  if (old == buffer && old) return;
+  if (old) {
     if (e) {
       bd (old)->views.removeAll (e);
       QObject::disconnect (e, &QTextEdit::cursorPositionChanged, nullptr, nullptr);
       QObject::disconnect (bdoc (old), nullptr, e, nullptr);
     }
     view->buffer = nullptr;
-    g_object_unref (old);
   }
-  if (!buffer) return;
+  struct ReleaseOld {
+    GtkTextBuffer *b;
+    ~ReleaseOld () { if (b) g_object_unref (b); }
+  } release { old };
+  if (!buffer) {
+    if (e && old) e->setDocument (new QTextDocument (e));
+    return;
+  }
   g_object_ref (buffer);
   view->buffer = buffer;
   if (e) {
@@ -1665,4 +1740,113 @@ PangoTabArray *gtk_text_view_get_tabs (GtkTextView *view)
   return t ? pango_tab_array_copy (t) : nullptr;
 }
 
+} /* extern "C" */
+
+/* ======================================================================
+ * GtkTextTagTable: a buffer's table works on the buffer's tags; a table
+ * made with gtk_text_tag_table_new keeps its own.
+ * ====================================================================== */
+struct _GtkTextTagTable {
+  GObject parent;
+  GtkTextBuffer *buffer;                 /* weak; null for a standalone table */
+  QMap<QString, GtkTextTag *> *own;
+};
+typedef struct { GObjectClass parent_class; } GtkTextTagTableClass;
+G_DEFINE_TYPE (GtkTextTagTable, gtk_text_tag_table, G_TYPE_OBJECT)
+static void gtk_text_tag_table_init (GtkTextTagTable *t) { t->own = new QMap<QString, GtkTextTag *>; }
+static void tag_table_finalize (GObject *o)
+{
+  auto *t = GTK_TEXT_TAG_TABLE (o);
+  for (GtkTextTag *tag : *t->own) g_object_unref (tag);
+  delete t->own;
+  if (t->buffer) g_object_remove_weak_pointer (G_OBJECT (t->buffer), (gpointer *) &t->buffer);
+  G_OBJECT_CLASS (gtk_text_tag_table_parent_class)->finalize (o);
+}
+static void gtk_text_tag_table_class_init (GtkTextTagTableClass *klass)
+{
+  G_OBJECT_CLASS (klass)->finalize = tag_table_finalize;
+  GType t = G_TYPE_FROM_CLASS (klass);
+  g_signal_new ("tag-added", t, G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 1, GTK_TYPE_TEXT_TAG);
+  g_signal_new ("tag-removed", t, G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 1, GTK_TYPE_TEXT_TAG);
+}
+
+static QMap<QString, GtkTextTag *> *table_tags (GtkTextTagTable *t)
+{
+  if (!t) return nullptr;
+  return t->buffer ? &bd (t->buffer)->tags : t->own;
+}
+
+static QString tag_key (GtkTextTag *tag)
+{
+  return tag->name ? gtkqt_str (tag->name) : QStringLiteral ("\x01%1").arg ((quintptr) tag);
+}
+
+extern "C" {
+GtkTextTagTable *gtk_text_tag_table_new (void) { return (GtkTextTagTable *) g_object_new (GTK_TYPE_TEXT_TAG_TABLE, nullptr); }
+} /* extern "C" */
+
+/* a buffer made with a table starts with its tags */
+static void buffer_take_table_tags (GtkTextBuffer *b, GtkTextTagTable *table)
+{
+  if (!table || table->buffer) return;
+  for (GtkTextTag *t : *table->own)
+    if (!bd (b)->tags.contains (tag_key (t))) bd (b)->tags.insert (tag_key (t), GTK_TEXT_TAG (g_object_ref (t)));
+}
+
+extern "C" {
+
+GtkTextTagTable *gtk_text_buffer_get_tag_table (GtkTextBuffer *buffer)
+{
+  auto *t = (GtkTextTagTable *) g_object_get_data (G_OBJECT (buffer), "gtkqt-tag-table");
+  if (!t) {
+    t = gtk_text_tag_table_new ();
+    t->buffer = buffer;
+    g_object_add_weak_pointer (G_OBJECT (buffer), (gpointer *) &t->buffer);
+    g_object_set_data_full (G_OBJECT (buffer), "gtkqt-tag-table", t, g_object_unref);
+  }
+  return t;
+}
+
+gboolean gtk_text_tag_table_add (GtkTextTagTable *table, GtkTextTag *tag)
+{
+  auto *tags = table_tags (table);
+  if (!tags || !tag || tags->contains (tag_key (tag))) return FALSE;
+  tags->insert (tag_key (tag), GTK_TEXT_TAG (g_object_ref (tag)));
+  g_signal_emit_by_name (table, "tag-added", tag);
+  return TRUE;
+}
+
+/* the tag also leaves the text it was applied to */
+void gtk_text_tag_table_remove (GtkTextTagTable *table, GtkTextTag *tag)
+{
+  auto *tags = table_tags (table);
+  if (!tags || !tag || tags->value (tag_key (tag)) != tag) return;
+  if (table->buffer) {
+    GtkTextIter s, e;
+    gtk_text_buffer_get_bounds (table->buffer, &s, &e);
+    gtk_text_buffer_remove_tag (table->buffer, tag, &s, &e);
+  }
+  tags->remove (tag_key (tag));
+  g_signal_emit_by_name (table, "tag-removed", tag);
+  g_object_unref (tag);
+}
+
+GtkTextTag *gtk_text_tag_table_lookup (GtkTextTagTable *table, const gchar *name)
+{
+  auto *tags = table_tags (table);
+  return tags && name ? tags->value (gtkqt_str (name)) : nullptr;
+}
+
+void gtk_text_tag_table_foreach (GtkTextTagTable *table, GtkTextTagTableForeach func, gpointer data)
+{
+  auto *tags = table_tags (table);
+  if (!tags || !func) return;
+  for (GtkTextTag *t : tags->values ()) func (t, data);
+}
+
+gint gtk_text_tag_table_get_size (GtkTextTagTable *table)
+{
+  auto *tags = table_tags (table);
+  return tags ? tags->size () : 0;
+}
 } /* extern "C" */

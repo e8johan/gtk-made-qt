@@ -624,20 +624,14 @@ guint32 gdk_keyval_to_unicode (guint keyval)
   return 0;
 }
 
-static const struct { const char *name; guint val; } key_names[] = {
-  { "BackSpace", GDK_KEY_BackSpace }, { "Tab", GDK_KEY_Tab }, { "Return", GDK_KEY_Return }, { "Escape", GDK_KEY_Escape },
-  { "Delete", GDK_KEY_Delete }, { "Insert", GDK_KEY_Insert }, { "Home", GDK_KEY_Home }, { "End", GDK_KEY_End },
-  { "Left", GDK_KEY_Left }, { "Up", GDK_KEY_Up }, { "Right", GDK_KEY_Right }, { "Down", GDK_KEY_Down },
-  { "Page_Up", GDK_KEY_Page_Up }, { "Page_Down", GDK_KEY_Page_Down }, { "space", GDK_KEY_space },
-  { "KP_Enter", GDK_KEY_KP_Enter }, { "Shift_L", GDK_KEY_Shift_L }, { "Shift_R", GDK_KEY_Shift_R },
-  { "Control_L", GDK_KEY_Control_L }, { "Control_R", GDK_KEY_Control_R }, { "Alt_L", GDK_KEY_Alt_L },
-  { "Alt_R", GDK_KEY_Alt_R }, { "Super_L", GDK_KEY_Super_L }, { "Menu", GDK_KEY_Menu }, { "plus", GDK_KEY_plus },
-  { "minus", GDK_KEY_minus }, { "equal", GDK_KEY_equal }, { "comma", GDK_KEY_comma }, { "period", GDK_KEY_period },
-  { "slash", GDK_KEY_slash }, { "question", GDK_KEY_question },
+/* every X keysym name (X11/keysymdef.h) */
+static const struct { const char *name; guint val; int deprecated; } key_names[] = {
+#include "keysyms.inc"
 };
 
 const gchar *gdk_keyval_name (guint keyval)
 {
+  for (auto &k : key_names) if (k.val == keyval && !k.deprecated) return k.name;
   for (auto &k : key_names) if (k.val == keyval) return k.name;
   if (keyval >= GDK_KEY_F1 && keyval <= GDK_KEY_F24) {
     static char buf[24][4];
@@ -656,6 +650,7 @@ const gchar *gdk_keyval_name (guint keyval)
 guint gdk_keyval_from_name (const gchar *keyval_name)
 {
   if (!keyval_name) return GDK_KEY_VoidSymbol;
+  for (auto &k : key_names) if (!strcmp (k.name, keyval_name)) return k.val;
   for (auto &k : key_names) if (!g_ascii_strcasecmp (k.name, keyval_name)) return k.val;
   if (keyval_name[0] && !keyval_name[1]) return (guchar) keyval_name[0];
   if ((keyval_name[0] == 'F' || keyval_name[0] == 'f') && g_ascii_isdigit (keyval_name[1])) {

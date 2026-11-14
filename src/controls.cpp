@@ -302,11 +302,49 @@ static void button_clicked_cb (GtkWidget *w)
     gtkqt_activate_action (w, action, (GVariant *) g_object_get_data (G_OBJECT (w), "gtkqt-action-target"));
 }
 
+/* GTK's order on a click: "released" (whose default handler emits
+ * "clicked", which toggles a toggle button) runs the program's released
+ * handlers last. Qt emits released before clicked, so ours waits for the
+ * clicked that follows (or for the event loop, when the pointer left). */
+static void release_now (GtkWidget *w)
+{
+  if (!g_object_get_data (G_OBJECT (w), "gtkqt-release-pending")) return;
+  g_object_set_data (G_OBJECT (w), "gtkqt-release-pending", nullptr);
+  g_signal_emit_by_name (w, "released");
+}
+
 static void button_connect (GtkWidget *w, QAbstractButton *b)
 {
-  gtkqt_connect (w, b, &QAbstractButton::clicked, [] (GtkWidget *bw, bool) { button_clicked_cb (bw); });
+  gtkqt_connect (w, b, &QAbstractButton::clicked, [] (GtkWidget *bw, bool) {
+    button_clicked_cb (bw);
+    if (!bw->priv->destroyed) release_now (bw);
+  });
   gtkqt_connect (w, b, &QAbstractButton::pressed, [] (GtkWidget *bw) { g_signal_emit_by_name (bw, "pressed"); });
-  gtkqt_connect (w, b, &QAbstractButton::released, [] (GtkWidget *bw) { g_signal_emit_by_name (bw, "released"); });
+  gtkqt_connect (w, b, &QAbstractButton::released, [b] (GtkWidget *bw) {
+    g_object_set_data (G_OBJECT (bw), "gtkqt-release-pending", GINT_TO_POINTER (1));
+    GtkWidget *keep = GTK_WIDGET (g_object_ref (bw));
+    QTimer::singleShot (0, b, [keep] {
+      GtkQtEmitGuard guard;
+      if (!keep->priv->destroyed) release_now (keep);
+      g_object_unref (keep);
+    });
+  });
+}
+
+/* Toggle, check and radio buttons change state in GtkToggleButton's
+ * "clicked" default handler, as in GTK, not by themselves: handlers of
+ * "clicked" (and accelerators emitting it) then see the new state. */
+template <class Base> class GtkQtToggle : public Base {
+protected:
+  void nextCheckState () override {}
+};
+
+static void toggle_real_clicked (GtkButton *button)
+{
+  auto *b = gtkqt_q<QAbstractButton> (GTK_WIDGET (button));
+  if (!b) return;
+  if (GTK_IS_RADIO_BUTTON (button)) { if (!b->isChecked ()) b->setChecked (true); }
+  else b->setChecked (!b->isChecked ());
 }
 
 static void toggle_connect (GtkWidget *w, QAbstractButton *b)
@@ -404,6 +442,9 @@ static void gtk_button_class_init (GtkButtonClass *klass)
   gtkqt_prop (klass, g_param_spec_string ("action-name", nullptr, nullptr, nullptr, RW),
               [] (GObject *o, const GValue *v) { gtk_actionable_set_action_name ((GtkActionable *) o, g_value_get_string (v)); },
               [] (GObject *o, GValue *v) { g_value_set_string (v, gtk_actionable_get_action_name ((GtkActionable *) o)); });
+  /* GtkActivatable (GTK 2.16-3): Glade writes these; the GtkAction link is not kept */
+  gtkqt_prop (klass, g_param_spec_boolean ("use-action-appearance", nullptr, nullptr, TRUE, RW), [] (GObject *, const GValue *) {}, nullptr);
+  gtkqt_prop (klass, g_param_spec_object ("related-action", nullptr, nullptr, G_TYPE_OBJECT, RW), [] (GObject *, const GValue *) {}, nullptr);
   gtkqt_prop (klass, g_param_spec_variant ("action-target", nullptr, nullptr, G_VARIANT_TYPE_ANY, nullptr, RW),
               [] (GObject *o, const GValue *v) { gtk_actionable_set_action_target_value ((GtkActionable *) o, g_value_get_variant (v)); }, nullptr);
 }
@@ -411,7 +452,7 @@ static void gtk_button_class_init (GtkButtonClass *klass)
 /* GtkToggleButton */
 static QObject *toggle_create (GtkWidget *w)
 {
-  auto *b = new QPushButton;
+  auto *b = new GtkQtToggle<QPushButton>;
   button_connect (w, b);
   toggle_connect (w, b);
   return b;
@@ -422,6 +463,7 @@ static void gtk_toggle_button_init (GtkToggleButton *) {}
 static void gtk_toggle_button_class_init (GtkToggleButtonClass *klass)
 {
   gtkqt_set_create (GTK_WIDGET_CLASS (klass), toggle_create);
+  GTK_BUTTON_CLASS (klass)->clicked = toggle_real_clicked;
   g_signal_new ("toggled", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_FIRST, G_STRUCT_OFFSET (GtkToggleButtonClass, toggled),
                 nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
   gtkqt_prop (klass, g_param_spec_boolean ("active", nullptr, nullptr, FALSE, RW),
@@ -441,7 +483,7 @@ static void gtk_toggle_button_class_init (GtkToggleButtonClass *klass)
 /* GtkCheckButton */
 static QObject *check_create (GtkWidget *w)
 {
-  auto *b = new QCheckBox;
+  auto *b = new GtkQtToggle<QCheckBox>;
   button_connect (w, b);
   toggle_connect (w, b);
   return b;
@@ -495,7 +537,7 @@ static void radio_join (GtkWidget *w, RadioGroup *g)
 
 static QObject *radio_create (GtkWidget *w)
 {
-  auto *b = new QRadioButton;
+  auto *b = new GtkQtToggle<QRadioButton>;
   b->setAutoExclusive (false);
   button_connect (w, b);
   toggle_connect (w, b);
@@ -677,11 +719,11 @@ void gtk_button_set_child (GtkButton *button, GtkWidget *child)
 
 GtkWidget *gtk_button_get_child (GtkButton *button) { return GTK_BIN (button)->child; }
 
+/* as in GTK: only "clicked" (whose default handler toggles a toggle
+ * button), no press or release */
 void gtk_button_clicked (GtkButton *button)
 {
-  auto *b = gtkqt_q<QAbstractButton> (GTK_WIDGET (button));
-  if (b && b->isEnabled ()) b->click ();
-  else button_clicked_cb (GTK_WIDGET (button));
+  if (gtk_widget_is_sensitive (GTK_WIDGET (button))) button_clicked_cb (GTK_WIDGET (button));
 }
 
 void gtk_button_pressed (GtkButton *button) { g_signal_emit_by_name (button, "pressed"); }
@@ -1142,6 +1184,8 @@ static void gtk_entry_class_init (GtkEntryClass *klass)
               [] (GObject *o, const GValue *v) { gtk_entry_set_activates_default (GTK_ENTRY (o), g_value_get_boolean (v)); }, nullptr);
   gtkqt_prop (klass, g_param_spec_enum ("input-purpose", nullptr, nullptr, gtk_input_purpose_get_type (), 0, RW),
               [] (GObject *o, const GValue *v) { gtk_entry_set_input_purpose (GTK_ENTRY (o), (GtkInputPurpose) g_value_get_enum (v)); }, nullptr);
+  for (const char *name : { "primary-icon-activatable", "secondary-icon-activatable", "primary-icon-sensitive", "secondary-icon-sensitive" })
+    gtkqt_prop (klass, g_param_spec_boolean (name, nullptr, nullptr, TRUE, RW), [] (GObject *, const GValue *) {}, nullptr);
   gtkqt_prop (klass, g_param_spec_string ("primary-icon-name", nullptr, nullptr, nullptr, RW),
               [] (GObject *o, const GValue *v) { gtk_entry_set_icon_from_icon_name (GTK_ENTRY (o), GTK_ENTRY_ICON_PRIMARY, g_value_get_string (v)); }, nullptr);
   gtkqt_prop (klass, g_param_spec_string ("secondary-icon-name", nullptr, nullptr, nullptr, RW),
@@ -1917,3 +1961,57 @@ void gtk_spinner_set_spinning (GtkSpinner *spinner, gboolean spinning)
 void gtk_spinner_start (GtkSpinner *spinner) { gtk_spinner_set_spinning (spinner, TRUE); }
 void gtk_spinner_stop (GtkSpinner *spinner) { gtk_spinner_set_spinning (spinner, FALSE); }
 }
+
+/* ======================================================================
+ * GtkArrow
+ * ====================================================================== */
+namespace {
+class GtkQtArrow : public QWidget {
+public:
+  GtkArrowType type = GTK_ARROW_RIGHT;
+  QSize sizeHint () const override { int s = style ()->pixelMetric (QStyle::PM_MenuButtonIndicator, nullptr, this); return QSize (s + 4, s + 4); }
+  QSize minimumSizeHint () const override { return QSize (8, 8); }
+protected:
+  void paintEvent (QPaintEvent *) override
+  {
+    if (type == GTK_ARROW_NONE) return;
+    static const QStyle::PrimitiveElement pe[] = { QStyle::PE_IndicatorArrowUp, QStyle::PE_IndicatorArrowDown,
+                                                   QStyle::PE_IndicatorArrowLeft, QStyle::PE_IndicatorArrowRight };
+    QStyleOption opt;
+    opt.initFrom (this);
+    int s = qMin (width (), height ());
+    opt.rect = QRect ((width () - s) / 2, (height () - s) / 2, s, s);
+    QPainter p (this);
+    style ()->drawPrimitive (pe[type], &opt, &p, this);
+  }
+};
+}
+
+static QObject *arrow_create (GtkWidget *) { return new GtkQtArrow; }
+
+G_DEFINE_TYPE (GtkArrow, gtk_arrow, GTK_TYPE_WIDGET)
+static void gtk_arrow_init (GtkArrow *a) { a->arrow_type = GTK_ARROW_RIGHT; a->shadow_type = GTK_SHADOW_OUT; }
+static void gtk_arrow_class_init (GtkArrowClass *klass)
+{
+  gtkqt_set_create (GTK_WIDGET_CLASS (klass), arrow_create);
+  gtkqt_prop (klass, g_param_spec_enum ("arrow-type", nullptr, nullptr, gtk_arrow_type_get_type (), GTK_ARROW_RIGHT, RW),
+              [] (GObject *o, const GValue *v) { gtk_arrow_set (GTK_ARROW (o), (GtkArrowType) g_value_get_enum (v), GTK_ARROW (o)->shadow_type); },
+              [] (GObject *o, GValue *v) { g_value_set_enum (v, GTK_ARROW (o)->arrow_type); });
+  gtkqt_prop (klass, g_param_spec_enum ("shadow-type", nullptr, nullptr, gtk_shadow_type_get_type (), GTK_SHADOW_OUT, RW),
+              [] (GObject *o, const GValue *v) { GTK_ARROW (o)->shadow_type = (GtkShadowType) g_value_get_enum (v); }, nullptr);
+}
+
+extern "C" {
+GtkWidget *gtk_arrow_new (GtkArrowType arrow_type, GtkShadowType shadow_type)
+{
+  auto *w = (GtkWidget *) g_object_new (GTK_TYPE_ARROW, nullptr);
+  gtk_arrow_set (GTK_ARROW (w), arrow_type, shadow_type);
+  return w;
+}
+void gtk_arrow_set (GtkArrow *arrow, GtkArrowType arrow_type, GtkShadowType shadow_type)
+{
+  arrow->arrow_type = arrow_type;
+  arrow->shadow_type = shadow_type;
+  if (auto *q = dynamic_cast<GtkQtArrow *> (gtkqt_qw (GTK_WIDGET (arrow)))) { q->type = arrow_type; q->update (); }
+}
+} /* extern "C" */

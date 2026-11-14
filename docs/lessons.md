@@ -36,6 +36,27 @@ Things that cost time once; check here before debugging something similar.
   sections until then.
 - An icon missing from the theme must leave an empty space (GTK's
   missing-image), not text.
+- Toggle buttons change state in GtkToggleButton's "clicked" default
+  handler, and GTK 2 runs the program's "released" handlers after
+  "clicked". Qt toggles first and emits released before clicked: Galculator
+  (whose released handler switches the button off, and whose clicked
+  handler ignores buttons that are off) saw every button off. Accelerators
+  that emit "clicked" must toggle too. `gtk_button_clicked` emits only
+  "clicked".
+- Qt fires neither of two actions with the same shortcut; GTK takes the
+  first accelerator whose widget answers can-activate-accel.
+- Every keysym name must resolve (`asterisk`, `KP_8` ...): builder files
+  name keys by keysym; the tables come from X11/keysymdef.h.
+- GtkBuilder `<accelerator>`s go to the toplevel window's accel group;
+  programs move that group to another window themselves (Galculator's
+  panels live in dummy windows).
+- A radio menu item made by GtkBuilder must be in a group of its own
+  before others join it through the "group" property.
+- Setting a text view's buffer must switch the QTextEdit's document before
+  the old buffer (and its QTextDocument) is released.
+- Check tests against real GTK: tests/test-galculator.c builds against the
+  system's GTK 2 as well (`gcc ... $(pkg-config --cflags --libs gtk+-2.0
+  gmodule-export-2.0) -rdynamic`, run under Xvfb).
 
 ## GTK 1.2
 

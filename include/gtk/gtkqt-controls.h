@@ -59,6 +59,8 @@ typedef struct _GtkButtonClass {
 } GtkButtonClass;
 #define GTK_TYPE_BUTTON  (gtk_button_get_type ())
 #define GTK_BUTTON(o)    (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_BUTTON, GtkButton))
+#define GTK_BUTTON_CLASS(k)       (G_TYPE_CHECK_CLASS_CAST ((k), GTK_TYPE_BUTTON, GtkButtonClass))
+#define GTK_BUTTON_GET_CLASS(o)   (G_TYPE_INSTANCE_GET_CLASS ((o), GTK_TYPE_BUTTON, GtkButtonClass))
 #define GTK_IS_BUTTON(o) (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_BUTTON))
 GType        gtk_button_get_type (void) G_GNUC_CONST;
 GtkWidget   *gtk_button_new (void);
@@ -390,6 +392,16 @@ void       gtk_gesture_single_set_button (GtkGestureSingle *gesture, guint butto
 guint      gtk_gesture_single_get_current_button (GtkGestureSingle *gesture);
 gboolean   gtk_gesture_drag_get_start_point (GtkGestureDrag *gesture, double *x, double *y);
 gboolean   gtk_gesture_drag_get_offset (GtkGestureDrag *gesture, double *x, double *y);
+
+/* GtkArrow (GTK 2/3): an arrow drawn by the Qt style */
+typedef struct _GtkArrow { GtkWidget widget; GtkArrowType arrow_type; GtkShadowType shadow_type; } GtkArrow;
+typedef struct _GtkArrowClass { GtkWidgetClass parent_class; } GtkArrowClass;
+#define GTK_TYPE_ARROW   (gtk_arrow_get_type ())
+#define GTK_ARROW(o)     (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_ARROW, GtkArrow))
+#define GTK_IS_ARROW(o)  (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_ARROW))
+GType      gtk_arrow_get_type (void) G_GNUC_CONST;
+GtkWidget *gtk_arrow_new (GtkArrowType arrow_type, GtkShadowType shadow_type);
+void       gtk_arrow_set (GtkArrow *arrow, GtkArrowType arrow_type, GtkShadowType shadow_type);
 
 G_END_DECLS
 

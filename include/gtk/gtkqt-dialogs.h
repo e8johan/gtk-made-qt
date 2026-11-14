@@ -200,6 +200,35 @@ GtkWidget *gtk_color_button_new (void);
 GtkWidget *gtk_color_button_new_with_rgba (const GdkRGBA *rgba);
 void       gtk_color_chooser_get_rgba (GtkColorChooser *chooser, GdkRGBA *color);
 void       gtk_color_chooser_set_rgba (GtkColorChooser *chooser, const GdkRGBA *color);
+void       gtk_color_button_set_color (GtkColorButton *button, const GdkColor *color);   /* GTK 2 */
+void       gtk_color_button_get_color (GtkColorButton *button, GdkColor *color);
+void       gtk_color_button_set_rgba (GtkColorButton *button, const GdkRGBA *rgba);
+void       gtk_color_button_get_rgba (GtkColorButton *button, GdkRGBA *rgba);
+void       gtk_color_button_set_title (GtkColorButton *button, const gchar *title);
+void       gtk_color_button_set_use_alpha (GtkColorButton *button, gboolean use_alpha);
+
+/* GtkFontButton (and the GTK 3 GtkFontChooser calls on it): a button
+ * naming the font that opens a QFontDialog. Font names are Pango's
+ * ("Sans Bold 12"). */
+GTKQT_SIMPLE_TYPE (GtkFontButton, GtkButton)
+typedef struct _GtkFontChooser GtkFontChooser;
+#define GTK_TYPE_FONT_BUTTON  (gtk_font_button_get_type ())
+#define GTK_FONT_BUTTON(o)    (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_FONT_BUTTON, GtkFontButton))
+#define GTK_IS_FONT_BUTTON(o) (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_FONT_BUTTON))
+#define GTK_FONT_CHOOSER(o)   ((GtkFontChooser *) (o))
+GType        gtk_font_button_get_type (void) G_GNUC_CONST;
+GtkWidget   *gtk_font_button_new (void);
+GtkWidget   *gtk_font_button_new_with_font (const gchar *fontname);
+gboolean     gtk_font_button_set_font_name (GtkFontButton *font_button, const gchar *fontname);
+const gchar *gtk_font_button_get_font_name (GtkFontButton *font_button);
+void         gtk_font_button_set_title (GtkFontButton *font_button, const gchar *title);
+const gchar *gtk_font_button_get_title (GtkFontButton *font_button);
+void         gtk_font_button_set_use_font (GtkFontButton *font_button, gboolean use_font);
+void         gtk_font_button_set_use_size (GtkFontButton *font_button, gboolean use_size);
+void         gtk_font_button_set_show_style (GtkFontButton *font_button, gboolean show_style);
+void         gtk_font_button_set_show_size (GtkFontButton *font_button, gboolean show_size);
+gchar       *gtk_font_chooser_get_font (GtkFontChooser *fontchooser);
+void         gtk_font_chooser_set_font (GtkFontChooser *fontchooser, const gchar *fontname);
 
 /* Stock item ids (GTK 2/3) */
 #define GTK_STOCK_ABOUT       "gtk-about"

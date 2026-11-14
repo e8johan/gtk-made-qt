@@ -1139,6 +1139,15 @@ static void gtk_tree_view_class_init (GtkTreeViewClass *klass)
   gtkqt_prop (klass, g_param_spec_object ("model", nullptr, nullptr, gtk_tree_model_get_type (), RW),
               [] (GObject *o, const GValue *v) { gtk_tree_view_set_model (GTK_TREE_VIEW (o), (GtkTreeModel *) g_value_get_object (v)); },
               [] (GObject *o, GValue *v) { g_value_set_object (v, gtk_tree_view_get_model (GTK_TREE_VIEW (o))); });
+  /* GTK 2: alternating row colours */
+  gtkqt_prop (klass, g_param_spec_boolean ("rules-hint", nullptr, nullptr, FALSE, RW),
+              [] (GObject *o, const GValue *v) {
+                if (auto *tv = gtkqt_q<QTreeView> (GTK_WIDGET (o))) tv->setAlternatingRowColors (g_value_get_boolean (v));
+              },
+              [] (GObject *o, GValue *v) {
+                auto *tv = gtkqt_q<QTreeView> (GTK_WIDGET (o));
+                g_value_set_boolean (v, tv && tv->alternatingRowColors ());
+              });
   gtkqt_prop (klass, g_param_spec_boolean ("headers-visible", nullptr, nullptr, TRUE, RW),
               [] (GObject *o, const GValue *v) { gtk_tree_view_set_headers_visible (GTK_TREE_VIEW (o), g_value_get_boolean (v)); }, nullptr);
   gtkqt_prop (klass, g_param_spec_boolean ("reorderable", nullptr, nullptr, FALSE, RW),

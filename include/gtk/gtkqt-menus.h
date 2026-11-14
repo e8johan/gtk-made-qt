@@ -90,6 +90,8 @@ GType      gtk_radio_menu_item_get_type (void) G_GNUC_CONST;
 GtkWidget *gtk_radio_menu_item_new_with_label (GSList *group, const gchar *label);
 GtkWidget *gtk_radio_menu_item_new_with_mnemonic (GSList *group, const gchar *label);
 GSList    *gtk_radio_menu_item_get_group (GtkRadioMenuItem *radio_menu_item);
+void       gtk_radio_menu_item_set_group (GtkRadioMenuItem *radio_menu_item, GSList *group);
+void       gtk_radio_menu_item_join_group (GtkRadioMenuItem *radio_menu_item, GtkRadioMenuItem *group_source);
 
 GTKQT_SIMPLE_TYPE (GtkSeparatorMenuItem, GtkMenuItem)
 #define GTK_TYPE_SEPARATOR_MENU_ITEM (gtk_separator_menu_item_get_type ())
@@ -105,6 +107,7 @@ GtkWidget *gtk_image_menu_item_new_from_stock (const gchar *stock_id, GtkAccelGr
 GtkWidget *gtk_image_menu_item_new_with_label (const gchar *label);
 GtkWidget *gtk_image_menu_item_new_with_mnemonic (const gchar *label);
 void       gtk_image_menu_item_set_image (GtkImageMenuItem *image_menu_item, GtkWidget *image);
+GtkWidget *gtk_image_menu_item_get_image (GtkImageMenuItem *image_menu_item);
 
 /* GtkOptionMenu (GTK 1/2): a button that pops up a GtkMenu */
 GTKQT_SIMPLE_TYPE (GtkOptionMenu, GtkButton)
