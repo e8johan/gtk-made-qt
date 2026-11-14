@@ -1512,8 +1512,10 @@ void gtk_drag_dest_set (GtkWidget *widget, GtkDestDefaults flags, const GtkTarge
   if (auto *a = qobject_cast<QAbstractScrollArea *> (qw)) target = a->viewport ();
   target->setAcceptDrops (true);
   qw->setAcceptDrops (true);
-  if (!target->findChild<GtkQtDropFilter *> (QString (), Qt::FindDirectChildrenOnly))
-    target->installEventFilter (new GtkQtDropFilter (widget, target));
+  /* findChild needs Q_OBJECT (Qt 6.11 checks), which the library's classes lack */
+  for (QObject *c : target->children ())
+    if (dynamic_cast<GtkQtDropFilter *> (c)) return;
+  target->installEventFilter (new GtkQtDropFilter (widget, target));
 }
 
 void gtk_drag_dest_unset (GtkWidget *widget) { g_object_set_data (G_OBJECT (widget), "gtkqt-drop", nullptr); }

@@ -115,3 +115,7 @@ Things that cost time once; check here before debugging something similar.
 - Programs include `gtk/gtktextiter.h` and other sub-headers directly.
 - Makefiles that do not depend on the archive are not relinked when the
   library changes: delete the program first.
+- Qt 6.11 refuses `findChild<T>` / `findChildren<T>` / `qobject_cast<T>`
+  for classes without Q_OBJECT; the library has no moc, so walk
+  `children()` with `dynamic_cast`. Found building in an Alpine root (GCC
+  15, Qt 6.11, musl), where the tests also pass.
