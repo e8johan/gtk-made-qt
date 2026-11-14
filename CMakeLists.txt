@@ -41,6 +41,11 @@ set(GTKQT_SOURCES
 
 # GtkBuilder's table of the library's own GType functions
 set(GTKQT_GENERATED ${CMAKE_CURRENT_BINARY_DIR}/generated)
+# keysym names for gdk_keyval_name / gdk_keyval_from_name
+add_custom_command(OUTPUT ${GTKQT_GENERATED}/keysyms.inc
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${GTKQT_GENERATED}
+    COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_keysym_table.py ${GTKQT_GENERATED}/keysyms.inc ${CMAKE_CURRENT_SOURCE_DIR}/include/X11/keysymdef.h
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_keysym_table.py ${CMAKE_CURRENT_SOURCE_DIR}/include/X11/keysymdef.h)
 add_custom_command(OUTPUT ${GTKQT_GENERATED}/types.inc
     COMMAND ${CMAKE_COMMAND} -E make_directory ${GTKQT_GENERATED}
     COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tools/gen_type_table.py ${GTKQT_GENERATED}/types.inc ${GTKQT_SOURCES}
@@ -93,7 +98,7 @@ endif()
 
 option(GTKQT_BUILD_SHARED "Also build the shared library for programs with plugins" ON)
 function(gtkqt_objects name)
-    add_library(${name} OBJECT ${GTKQT_SOURCES} ${GTKQT_GENERATED}/types.inc)
+    add_library(${name} OBJECT ${GTKQT_SOURCES} ${GTKQT_GENERATED}/types.inc ${GTKQT_GENERATED}/keysyms.inc)
     target_compile_definitions(${name} PRIVATE GTKQT_COMPILATION QT_NO_KEYWORDS ${ARGN})
     if(GTKQT_HAVE_SWAPCONTEXT)
         target_compile_definitions(${name} PRIVATE GTKQT_HAVE_SWAPCONTEXT)

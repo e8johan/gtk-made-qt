@@ -110,6 +110,8 @@ GType gtk_selection_mode_get_type (void) G_GNUC_CONST;
 #define GTK_TYPE_SELECTION_MODE (gtk_selection_mode_get_type ())
 GType gtk_window_position_get_type (void) G_GNUC_CONST;
 #define GTK_TYPE_WINDOW_POSITION (gtk_window_position_get_type ())
+GType gtk_arrow_type_get_type (void) G_GNUC_CONST;
+#define GTK_TYPE_ARROW_TYPE (gtk_arrow_type_get_type ())
 GType gtk_shadow_type_get_type (void) G_GNUC_CONST;
 #define GTK_TYPE_SHADOW_TYPE (gtk_shadow_type_get_type ())
 GType gtk_relief_style_get_type (void) G_GNUC_CONST;
@@ -133,6 +135,22 @@ GType gtk_icon_size_get_type (void) G_GNUC_CONST;
 GType gtk_file_chooser_action_get_type (void) G_GNUC_CONST;
 #define GTK_TYPE_FILE_CHOOSER_ACTION (gtk_file_chooser_action_get_type ())
 
+/* GtkScrollType (keyboard scrolling signals: move-slider, scroll-child ...) */
+typedef enum {
+  GTK_SCROLL_NONE, GTK_SCROLL_JUMP, GTK_SCROLL_STEP_BACKWARD, GTK_SCROLL_STEP_FORWARD,
+  GTK_SCROLL_PAGE_BACKWARD, GTK_SCROLL_PAGE_FORWARD, GTK_SCROLL_STEP_UP, GTK_SCROLL_STEP_DOWN,
+  GTK_SCROLL_PAGE_UP, GTK_SCROLL_PAGE_DOWN, GTK_SCROLL_STEP_LEFT, GTK_SCROLL_STEP_RIGHT,
+  GTK_SCROLL_PAGE_LEFT, GTK_SCROLL_PAGE_RIGHT, GTK_SCROLL_START, GTK_SCROLL_END
+} GtkScrollType;
+
+/* GtkStateFlags (GTK 3) */
+typedef enum {
+  GTK_STATE_FLAG_NORMAL = 0, GTK_STATE_FLAG_ACTIVE = 1 << 0, GTK_STATE_FLAG_PRELIGHT = 1 << 1,
+  GTK_STATE_FLAG_SELECTED = 1 << 2, GTK_STATE_FLAG_INSENSITIVE = 1 << 3, GTK_STATE_FLAG_INCONSISTENT = 1 << 4,
+  GTK_STATE_FLAG_FOCUSED = 1 << 5, GTK_STATE_FLAG_BACKDROP = 1 << 6, GTK_STATE_FLAG_DIR_LTR = 1 << 7,
+  GTK_STATE_FLAG_DIR_RTL = 1 << 8, GTK_STATE_FLAG_LINK = 1 << 9, GTK_STATE_FLAG_VISITED = 1 << 10,
+  GTK_STATE_FLAG_CHECKED = 1 << 11, GTK_STATE_FLAG_DROP_ACTIVE = 1 << 12, GTK_STATE_FLAG_FOCUS_VISIBLE = 1 << 13
+} GtkStateFlags;
 G_END_DECLS
 
 #endif

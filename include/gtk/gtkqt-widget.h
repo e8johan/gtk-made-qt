@@ -374,6 +374,8 @@ typedef enum {
   GDK_WINDOW_TYPE_HINT_TOOLTIP, GDK_WINDOW_TYPE_HINT_NOTIFICATION, GDK_WINDOW_TYPE_HINT_COMBO,
   GDK_WINDOW_TYPE_HINT_DND
 } GdkWindowTypeHint;
+GType      gdk_window_type_hint_get_type (void) G_GNUC_CONST;
+#define GDK_TYPE_WINDOW_TYPE_HINT (gdk_window_type_hint_get_type ())
 void       gtk_window_set_type_hint (GtkWindow *window, GdkWindowTypeHint hint);
 GdkWindowTypeHint gtk_window_get_type_hint (GtkWindow *window);
 void       gtk_window_set_wmclass (GtkWindow *window, const gchar *wmclass_name, const gchar *wmclass_class);
@@ -414,6 +416,7 @@ GtkAccelGroup *gtk_accel_group_new (void);
 typedef enum { GTK_ACCEL_VISIBLE = 1 << 0, GTK_ACCEL_LOCKED = 1 << 1, GTK_ACCEL_MASK = 0x07 } GtkAccelFlags;
 void  gtk_accelerator_parse (const gchar *accelerator, guint *accelerator_key, GdkModifierType *accelerator_mods);
 gchar *gtk_accelerator_name (guint accelerator_key, GdkModifierType accelerator_mods);
+gchar *gtk_accelerator_get_label (guint accelerator_key, GdkModifierType accelerator_mods);   /* "Ctrl+S" */
 
 G_END_DECLS
 

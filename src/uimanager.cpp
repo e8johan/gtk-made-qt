@@ -495,3 +495,55 @@ GtkAccelGroup *gtk_ui_manager_get_accel_group (GtkUIManager *m)
 void gtk_ui_manager_ensure_update (GtkUIManager *) {}
 
 } /* extern "C" */
+
+/* ---------- accelerator queries ----------
+ * Each accelerator's QAction records its key, modifiers and closure; the
+ * closure knows its group. */
+static QHash<GClosure *, GtkAccelGroup *> s_closure_groups;
+static guint s_default_mod_mask = GDK_CONTROL_MASK | GDK_SHIFT_MASK | GDK_MOD1_MASK | GDK_SUPER_MASK | GDK_META_MASK;
+
+void gtkqt_accel_set_info (QAction *a, GClosure *closure, GtkAccelGroup *group, guint key, GdkModifierType mods)
+{
+  a->setProperty ("gtkqt-closure", QVariant::fromValue ((void *) closure));
+  a->setProperty ("gtkqt-accel-key", key);
+  a->setProperty ("gtkqt-accel-mods", (uint) mods);
+  if (closure && group) {
+    s_closure_groups.insert (closure, group);
+    g_closure_add_invalidate_notifier (closure, nullptr, [] (gpointer, GClosure *c) { s_closure_groups.remove (c); });
+  }
+}
+
+extern "C" {
+GtkAccelKey *gtk_accel_group_find (GtkAccelGroup *group, GtkAccelGroupFindFunc find_func, gpointer data)
+{
+  static GtkAccelKey found;
+  if (!group || !find_func) return nullptr;
+  for (const QPointer<QAction> &a : QList<QPointer<QAction>> (accel (group)->actions)) {
+    if (!a || !a->property ("gtkqt-closure").isValid ()) continue;
+    GtkAccelKey key = { a->property ("gtkqt-accel-key").toUInt (),
+                        (GdkModifierType) a->property ("gtkqt-accel-mods").toUInt (), 1 /* GTK_ACCEL_VISIBLE */ };
+    auto *closure = (GClosure *) a->property ("gtkqt-closure").value<void *> ();
+    if (find_func (&key, closure, data)) { found = key; return &found; }
+  }
+  return nullptr;
+}
+
+GtkAccelGroup *gtk_accel_group_from_accel_closure (GClosure *closure) { return s_closure_groups.value (closure); }
+
+GList *gtk_widget_list_accel_closures (GtkWidget *widget)
+{
+  return g_list_copy ((GList *) g_object_get_data (G_OBJECT (widget), "gtkqt-accel-closures"));
+}
+
+void gtk_accelerator_set_default_mod_mask (GdkModifierType mask) { s_default_mod_mask = mask; }
+GdkModifierType gtk_accelerator_get_default_mod_mask (void) { return (GdkModifierType) s_default_mod_mask; }
+} /* extern "C" */
+
+/* the accelerator as people read it, in Qt's (the platform's) words */
+extern "C" gchar *gtk_accelerator_get_label (guint key, GdkModifierType mods)
+{
+  gchar *name = gtk_accelerator_name (key, mods);
+  QKeySequence seq = gtkqt_accel_to_keyseq (name);
+  g_free (name);
+  return g_strdup (seq.toString (QKeySequence::NativeText).toUtf8 ().constData ());
+}

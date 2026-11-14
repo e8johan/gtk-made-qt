@@ -1050,7 +1050,8 @@ static QObject *color_button_create (GtkWidget *w)
   auto *b = new QPushButton;
   gtkqt_connect (w, b, &QPushButton::clicked, [] (GtkWidget *cw, bool) {
     auto *c = static_cast<QColor *> (g_object_get_data (G_OBJECT (cw), "gtkqt-color"));
-    QColor chosen = QColorDialog::getColor (*c, gtkqt_qw (cw), QString (), QColorDialog::ShowAlphaChannel);
+    auto *title = (const gchar *) g_object_get_data (G_OBJECT (cw), "gtkqt-title");
+    QColor chosen = QColorDialog::getColor (*c, gtkqt_qw (cw), gtkqt_str (title), QColorDialog::ShowAlphaChannel);
     if (!chosen.isValid ()) return;
     *c = chosen;
     color_button_paint (cw);
@@ -1069,6 +1070,10 @@ static void gtk_color_button_class_init (GtkColorButtonClass *klass)
 {
   gtkqt_set_create (GTK_WIDGET_CLASS (klass), color_button_create);
   g_signal_new ("color-set", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_FIRST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
+  gtkqt_prop (klass, g_param_spec_string ("title", nullptr, nullptr, nullptr, RW),
+              [] (GObject *o, const GValue *v) { gtk_color_button_set_title (GTK_COLOR_BUTTON (o), g_value_get_string (v)); },
+              [] (GObject *o, GValue *v) { g_value_set_string (v, (const gchar *) g_object_get_data (o, "gtkqt-title")); });
+  gtkqt_prop (klass, g_param_spec_boolean ("use-alpha", nullptr, nullptr, FALSE, RW), [] (GObject *, const GValue *) {}, nullptr);
   gtkqt_prop (klass, g_param_spec_boxed ("rgba", nullptr, nullptr, GDK_TYPE_RGBA, RW),
               [] (GObject *o, const GValue *v) { if (auto *c = (GdkRGBA *) g_value_get_boxed (v)) gtk_color_chooser_set_rgba ((GtkColorChooser *) o, c); },
               [] (GObject *o, GValue *v) { GdkRGBA c; gtk_color_chooser_get_rgba ((GtkColorChooser *) o, &c); g_value_set_boxed (v, &c); });
@@ -1104,3 +1109,153 @@ void gtk_color_chooser_set_rgba (GtkColorChooser *chooser, const GdkRGBA *color)
   color_button_paint ((GtkWidget *) chooser);
 }
 }
+
+/* ======================================================================
+ * GtkColorButton, GTK 2 calls (GdkColor: 16 bits a channel)
+ * ====================================================================== */
+extern "C" {
+void gtk_color_button_set_color (GtkColorButton *button, const GdkColor *color)
+{
+  if (!color) return;
+  GdkRGBA c = { color->red / 65535.0, color->green / 65535.0, color->blue / 65535.0, 1.0 };
+  gtk_color_chooser_set_rgba ((GtkColorChooser *) button, &c);
+}
+void gtk_color_button_get_color (GtkColorButton *button, GdkColor *color)
+{
+  GdkRGBA c;
+  gtk_color_chooser_get_rgba ((GtkColorChooser *) button, &c);
+  if (!color) return;
+  color->pixel = 0;
+  color->red = (guint16) qRound (c.red * 65535);
+  color->green = (guint16) qRound (c.green * 65535);
+  color->blue = (guint16) qRound (c.blue * 65535);
+}
+void gtk_color_button_set_rgba (GtkColorButton *b, const GdkRGBA *c) { gtk_color_chooser_set_rgba ((GtkColorChooser *) b, c); }
+void gtk_color_button_get_rgba (GtkColorButton *b, GdkRGBA *c) { gtk_color_chooser_get_rgba ((GtkColorChooser *) b, c); }
+void gtk_color_button_set_title (GtkColorButton *b, const gchar *title)
+{
+  g_object_set_data_full (G_OBJECT (b), "gtkqt-title", g_strdup (title), g_free);
+}
+void gtk_color_button_set_use_alpha (GtkColorButton *, gboolean) {}
+} /* extern "C" */
+
+/* ======================================================================
+ * GtkFontButton: shows the font's name in the font itself (use-font) and
+ * opens a QFontDialog; "font-set" when the user picks one
+ * ====================================================================== */
+static void font_button_update (GtkWidget *w)
+{
+  auto *b = gtkqt_q<QPushButton> (w);
+  auto *name = (const gchar *) g_object_get_data (G_OBJECT (w), "gtkqt-font-name");
+  if (!b || !name) return;
+  PangoFontDescription *desc = pango_font_description_from_string (name);
+  QFont f = gtkqt_font_from_pango (desc);
+  pango_font_description_free (desc);
+  bool show_size = !g_object_get_data (G_OBJECT (w), "gtkqt-hide-size");
+  QString label = f.family ();
+  if (!f.styleName ().isEmpty ()) label += QLatin1Char (' ') + f.styleName ();
+  else if (f.bold () || f.italic ()) label += QLatin1Char (' ') + QString (f.bold () ? "Bold" : "") + (f.italic () ? (f.bold () ? " Italic" : "Italic") : "");
+  if (show_size) label += QStringLiteral (" %1").arg (f.pointSizeF ());
+  b->setText (label.replace ('&', QStringLiteral ("&&")));
+  if (g_object_get_data (G_OBJECT (w), "gtkqt-use-font")) {
+    QFont shown = f;
+    if (!g_object_get_data (G_OBJECT (w), "gtkqt-use-size")) shown.setPointSizeF (QApplication::font ().pointSizeF ());
+    b->setFont (shown);
+  }
+}
+
+static QObject *font_button_create (GtkWidget *w)
+{
+  auto *b = new QPushButton;
+  gtkqt_connect (w, b, &QPushButton::clicked, [] (GtkWidget *fw, bool) {
+    auto *name = (const gchar *) g_object_get_data (G_OBJECT (fw), "gtkqt-font-name");
+    PangoFontDescription *desc = pango_font_description_from_string (name ? name : "Sans 10");
+    QFont current = gtkqt_font_from_pango (desc);
+    pango_font_description_free (desc);
+    bool ok = false;
+    auto *title = (const gchar *) g_object_get_data (G_OBJECT (fw), "gtkqt-title");
+    QFont chosen = QFontDialog::getFont (&ok, current, gtkqt_qw (fw), gtkqt_str (title ? title : "Pick a Font"));
+    if (!ok) return;
+    PangoFontDescription *out = gtkqt_pango_from_font (chosen);
+    gchar *s = pango_font_description_to_string (out);
+    pango_font_description_free (out);
+    gtk_font_button_set_font_name (GTK_FONT_BUTTON (fw), s);
+    g_free (s);
+    g_signal_emit_by_name (fw, "font-set");
+  });
+  return b;
+}
+
+G_DEFINE_TYPE (GtkFontButton, gtk_font_button, GTK_TYPE_BUTTON)
+static void gtk_font_button_init (GtkFontButton *b)
+{
+  g_object_set_data_full (G_OBJECT (b), "gtkqt-font-name", g_strdup ("Sans 12"), g_free);
+}
+static void gtk_font_button_class_init (GtkFontButtonClass *klass)
+{
+  gtkqt_set_create (GTK_WIDGET_CLASS (klass), font_button_create);
+  g_signal_new ("font-set", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_FIRST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
+  auto font_set = [] (GObject *o, const GValue *v) { gtk_font_button_set_font_name (GTK_FONT_BUTTON (o), g_value_get_string (v)); };
+  auto font_get = [] (GObject *o, GValue *v) { g_value_set_string (v, gtk_font_button_get_font_name (GTK_FONT_BUTTON (o))); };
+  gtkqt_prop (klass, g_param_spec_string ("font-name", nullptr, nullptr, "Sans 12", RW), font_set, font_get);
+  gtkqt_prop (klass, g_param_spec_string ("font", nullptr, nullptr, "Sans 12", RW), font_set, font_get);
+  gtkqt_prop (klass, g_param_spec_string ("title", nullptr, nullptr, nullptr, RW),
+              [] (GObject *o, const GValue *v) { gtk_font_button_set_title (GTK_FONT_BUTTON (o), g_value_get_string (v)); }, nullptr);
+  gtkqt_prop (klass, g_param_spec_boolean ("use-font", nullptr, nullptr, FALSE, RW),
+              [] (GObject *o, const GValue *v) { gtk_font_button_set_use_font (GTK_FONT_BUTTON (o), g_value_get_boolean (v)); }, nullptr);
+  gtkqt_prop (klass, g_param_spec_boolean ("use-size", nullptr, nullptr, FALSE, RW),
+              [] (GObject *o, const GValue *v) { gtk_font_button_set_use_size (GTK_FONT_BUTTON (o), g_value_get_boolean (v)); }, nullptr);
+  gtkqt_prop (klass, g_param_spec_boolean ("show-size", nullptr, nullptr, TRUE, RW),
+              [] (GObject *o, const GValue *v) { gtk_font_button_set_show_size (GTK_FONT_BUTTON (o), g_value_get_boolean (v)); }, nullptr);
+  gtkqt_prop (klass, g_param_spec_boolean ("show-style", nullptr, nullptr, TRUE, RW),
+              [] (GObject *o, const GValue *v) { gtk_font_button_set_show_style (GTK_FONT_BUTTON (o), g_value_get_boolean (v)); }, nullptr);
+}
+
+extern "C" {
+GtkWidget *gtk_font_button_new (void)
+{
+  GtkWidget *w = (GtkWidget *) g_object_new (GTK_TYPE_FONT_BUTTON, nullptr);
+  font_button_update (w);
+  return w;
+}
+GtkWidget *gtk_font_button_new_with_font (const gchar *fontname)
+{
+  GtkWidget *w = gtk_font_button_new ();
+  gtk_font_button_set_font_name (GTK_FONT_BUTTON (w), fontname);
+  return w;
+}
+gboolean gtk_font_button_set_font_name (GtkFontButton *b, const gchar *fontname)
+{
+  if (!fontname) return FALSE;
+  g_object_set_data_full (G_OBJECT (b), "gtkqt-font-name", g_strdup (fontname), g_free);
+  font_button_update (GTK_WIDGET (b));
+  g_object_notify (G_OBJECT (b), "font-name");
+  return TRUE;
+}
+const gchar *gtk_font_button_get_font_name (GtkFontButton *b)
+{
+  return (const gchar *) g_object_get_data (G_OBJECT (b), "gtkqt-font-name");
+}
+void gtk_font_button_set_title (GtkFontButton *b, const gchar *title)
+{
+  g_object_set_data_full (G_OBJECT (b), "gtkqt-title", g_strdup (title), g_free);
+}
+const gchar *gtk_font_button_get_title (GtkFontButton *b) { return (const gchar *) g_object_get_data (G_OBJECT (b), "gtkqt-title"); }
+static void font_button_flag (GtkFontButton *b, const char *key, gboolean on)
+{
+  g_object_set_data (G_OBJECT (b), key, GINT_TO_POINTER (on ? 1 : 0));
+  font_button_update (GTK_WIDGET (b));
+}
+void gtk_font_button_set_use_font (GtkFontButton *b, gboolean v) { font_button_flag (b, "gtkqt-use-font", v); }
+void gtk_font_button_set_use_size (GtkFontButton *b, gboolean v) { font_button_flag (b, "gtkqt-use-size", v); }
+void gtk_font_button_set_show_style (GtkFontButton *, gboolean) {}
+void gtk_font_button_set_show_size (GtkFontButton *b, gboolean v) { font_button_flag (b, "gtkqt-hide-size", !v); }
+gchar *gtk_font_chooser_get_font (GtkFontChooser *c)
+{
+  return GTK_IS_FONT_BUTTON (c) ? g_strdup (gtk_font_button_get_font_name (GTK_FONT_BUTTON (c))) : nullptr;
+}
+void gtk_font_chooser_set_font (GtkFontChooser *c, const gchar *fontname)
+{
+  if (GTK_IS_FONT_BUTTON (c)) gtk_font_button_set_font_name (GTK_FONT_BUTTON (c), fontname);
+}
+} /* extern "C" */

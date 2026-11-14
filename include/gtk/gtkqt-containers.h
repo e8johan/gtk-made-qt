@@ -309,6 +309,21 @@ void       gtk_statusbar_remove (GtkStatusbar *statusbar, guint context_id, guin
 void       gtk_statusbar_remove_all (GtkStatusbar *statusbar, guint context_id);
 void       gtk_statusbar_set_has_resize_grip (GtkStatusbar *statusbar, gboolean setting);
 
+/* GtkSizeGroup: the widgets of a group get the largest one's size */
+typedef enum { GTK_SIZE_GROUP_NONE, GTK_SIZE_GROUP_HORIZONTAL, GTK_SIZE_GROUP_VERTICAL, GTK_SIZE_GROUP_BOTH } GtkSizeGroupMode;
+typedef struct _GtkSizeGroup GtkSizeGroup;
+#define GTK_TYPE_SIZE_GROUP   (gtk_size_group_get_type ())
+#define GTK_SIZE_GROUP(o)     (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_SIZE_GROUP, GtkSizeGroup))
+#define GTK_IS_SIZE_GROUP(o)  (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_SIZE_GROUP))
+GType            gtk_size_group_get_type (void) G_GNUC_CONST;
+GtkSizeGroup    *gtk_size_group_new (GtkSizeGroupMode mode);
+void             gtk_size_group_set_mode (GtkSizeGroup *size_group, GtkSizeGroupMode mode);
+GtkSizeGroupMode gtk_size_group_get_mode (GtkSizeGroup *size_group);
+void             gtk_size_group_add_widget (GtkSizeGroup *size_group, GtkWidget *widget);
+void             gtk_size_group_remove_widget (GtkSizeGroup *size_group, GtkWidget *widget);
+GSList          *gtk_size_group_get_widgets (GtkSizeGroup *size_group);
+void             gtk_size_group_set_ignore_hidden (GtkSizeGroup *size_group, gboolean ignore_hidden);
+
 G_END_DECLS
 
 #endif

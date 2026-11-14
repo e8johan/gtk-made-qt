@@ -382,7 +382,10 @@ static void register_object (GtkBuilder *b, const QString &id, GObject *o)
   /* the builder keeps one reference to everything it hands out */
   if (G_IS_INITIALLY_UNOWNED (o)) g_object_ref_sink (o);
   bd (b)->order << o;
-  if (!id.isEmpty ()) bd (b)->objects.insert (id, o);
+  if (!id.isEmpty ()) {
+    bd (b)->objects.insert (id, o);
+    gtk_buildable_set_name ((GtkBuildable *) o, id.toUtf8 ().constData ());
+  }
 }
 
 static GObject *build_object (GtkBuilder *b, Node *n, GObject *existing, GError **error)
@@ -423,6 +426,20 @@ static GObject *build_object (GtkBuilder *b, Node *n, GObject *existing, GError 
                                        k->attr ("after").toLower () == "yes" || k->attr ("after").toLower () == "true",
                                        k->attr ("swapped").isEmpty () ? !k->attr ("object").isEmpty ()
                                          : (k->attr ("swapped").toLower () == "yes" || k->attr ("swapped").toLower () == "true") };
+    } else if (k->tag == "accelerator" && GTK_IS_WIDGET (obj)) {
+      /* added to the toplevel window's accel group once the widget has one */
+      guint key = gdk_keyval_from_name (k->attr ("key").toUtf8 ().constData ());
+      guint mods = 0;
+      QString m = k->attr ("modifiers");
+      static const struct { const char *name; guint mask; } names[] = {
+        { "SHIFT", GDK_SHIFT_MASK }, { "LOCK", GDK_LOCK_MASK }, { "CONTROL", GDK_CONTROL_MASK },
+        { "MOD1", GDK_MOD1_MASK }, { "MOD2", GDK_MOD2_MASK }, { "MOD3", GDK_MOD3_MASK },
+        { "MOD4", GDK_MOD4_MASK }, { "MOD5", GDK_MOD5_MASK }, { "SUPER", GDK_SUPER_MASK },
+        { "META", GDK_META_MASK }, { "ALT", GDK_MOD1_MASK } };
+      for (const QString &part : m.split ('|', Qt::SkipEmptyParts))
+        for (const auto &nm : names)
+          if (part.trimmed ().toUpper ().endsWith (QLatin1String (nm.name) + QLatin1String ("_MASK"))) mods |= nm.mask;
+      if (key) gtkqt_builder_pending_accel (GTK_WIDGET (obj), k->attr ("signal").toUtf8 (), key, (GdkModifierType) mods);
     } else if (k->tag == "child") {
       Node *child_obj = nullptr, *packing = nullptr, *layout = nullptr;
       for (Node *c : k->kids) {
@@ -516,6 +533,7 @@ guint gtk_builder_add_from_string (GtkBuilder *b, const gchar *buffer, gsize len
     else g_warning ("GtkBuilder: unknown object '%s'", p.id.toUtf8 ().constData ());
   bd (b)->deferred.clear ();
   delete root;
+  gtkqt_builder_accels_retry ();
   /* GTK 4 connects handlers while building; GTK 2/3 wait for connect_signals() */
   if (ok && gtkqt_api >= 4) {
     static GModule *module = g_module_open (nullptr, (GModuleFlags) 0);
@@ -605,3 +623,53 @@ void gtk_builder_set_current_object (GtkBuilder *, GObject *) {}
 GType gtk_builder_get_type_from_name (GtkBuilder *, const char *type_name) { return resolve_type (QString::fromUtf8 (type_name)); }
 
 } /* extern "C" */
+
+/* ---------- <accelerator> ----------
+ * GTK adds a builder accelerator to the accel group of the widget's
+ * toplevel window (making one if the window has none). A widget built in a
+ * file of its own (button panels) gets its window when it is packed: the
+ * accelerators wait until then. */
+struct PendingAccel { QByteArray signal; guint key; GdkModifierType mods; };
+static QList<GtkWidget *> s_accel_widgets;                    /* weak */
+bool gtkqt_builder_accels_waiting = false;
+
+static void pending_gone (gpointer, GObject *w)
+{
+  s_accel_widgets.removeAll ((GtkWidget *) w);
+  gtkqt_builder_accels_waiting = !s_accel_widgets.isEmpty ();
+}
+
+void gtkqt_builder_pending_accel (GtkWidget *w, const QByteArray &signal, guint key, GdkModifierType mods)
+{
+  auto *list = static_cast<QList<PendingAccel> *> (g_object_get_data (G_OBJECT (w), "gtkqt-pending-accels"));
+  if (!list) {
+    list = new QList<PendingAccel>;
+    g_object_set_data_full (G_OBJECT (w), "gtkqt-pending-accels", list, [] (gpointer p) { delete static_cast<QList<PendingAccel> *> (p); });
+    s_accel_widgets << w;
+    g_object_weak_ref (G_OBJECT (w), pending_gone, nullptr);
+  }
+  *list << PendingAccel { signal, key, mods };
+  gtkqt_builder_accels_waiting = true;
+}
+
+void gtkqt_builder_accels_retry (void)
+{
+  for (GtkWidget *w : QList<GtkWidget *> (s_accel_widgets)) {
+    GtkWidget *top = gtk_widget_get_toplevel (w);
+    if (!GTK_IS_WINDOW (top)) continue;
+    GSList *groups = gtk_accel_groups_from_object (G_OBJECT (top));
+    GtkAccelGroup *group = groups ? (GtkAccelGroup *) groups->data : nullptr;
+    if (!group) {
+      group = gtk_accel_group_new ();
+      gtk_window_add_accel_group (GTK_WINDOW (top), group);
+      g_object_unref (group);
+    }
+    auto *list = static_cast<QList<PendingAccel> *> (g_object_get_data (G_OBJECT (w), "gtkqt-pending-accels"));
+    for (const PendingAccel &a : *list)
+      gtk_widget_add_accelerator (w, a.signal.constData (), group, a.key, a.mods, GTK_ACCEL_VISIBLE);
+    g_object_weak_unref (G_OBJECT (w), pending_gone, nullptr);
+    s_accel_widgets.removeAll (w);
+    g_object_set_data (G_OBJECT (w), "gtkqt-pending-accels", nullptr);
+  }
+  gtkqt_builder_accels_waiting = !s_accel_widgets.isEmpty ();
+}

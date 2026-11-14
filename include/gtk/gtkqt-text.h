@@ -257,6 +257,20 @@ gint           gtk_text_view_get_left_margin (GtkTextView *text_view);
 gint           gtk_text_view_get_right_margin (GtkTextView *text_view);
 void           gtk_text_view_set_indent (GtkTextView *text_view, gint indent);
 
+/* GtkTextTagTable: a buffer's named tags */
+#define GTK_TYPE_TEXT_TAG_TABLE  (gtk_text_tag_table_get_type ())
+#define GTK_TEXT_TAG_TABLE(o)    (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_TEXT_TAG_TABLE, GtkTextTagTable))
+#define GTK_IS_TEXT_TAG_TABLE(o) (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_TEXT_TAG_TABLE))
+typedef void (*GtkTextTagTableForeach) (GtkTextTag *tag, gpointer data);
+GType            gtk_text_tag_table_get_type (void) G_GNUC_CONST;
+GtkTextTagTable *gtk_text_tag_table_new (void);
+GtkTextTagTable *gtk_text_buffer_get_tag_table (GtkTextBuffer *buffer);
+gboolean         gtk_text_tag_table_add (GtkTextTagTable *table, GtkTextTag *tag);
+void             gtk_text_tag_table_remove (GtkTextTagTable *table, GtkTextTag *tag);
+GtkTextTag      *gtk_text_tag_table_lookup (GtkTextTagTable *table, const gchar *name);
+void             gtk_text_tag_table_foreach (GtkTextTagTable *table, GtkTextTagTableForeach func, gpointer data);
+gint             gtk_text_tag_table_get_size (GtkTextTagTable *table);
+
 G_END_DECLS
 
 #endif

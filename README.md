@@ -66,6 +66,18 @@ have check buttons as their labels.
 
 ![Asunder preferences](docs/screenshots/asunder-prefs.png)
 
+[Galculator 2.1.4](https://github.com/galculator/galculator), the GTK 2 / 3
+scientific calculator whose whole interface is GtkBuilder files, builds
+unmodified with either GTK version. Its keys are builder accelerators on
+toggle buttons, its display a text view with tags, and its preferences
+use font and color buttons.
+
+| Galculator, real GTK 2 | Galculator on GTK made Qt (GTK 2 build) |
+| --- | --- |
+| ![Galculator on GTK 2](docs/screenshots/galculator-gtk2.png) | ![Galculator on Qt](docs/screenshots/galculator-qt.png) |
+
+![Galculator scientific and paper modes, preferences](docs/screenshots/galculator-modes.png)
+
 ## Quick start
 
 ```bash

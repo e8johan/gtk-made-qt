@@ -144,6 +144,9 @@ static void gtk_window_class_init (GtkWindowClass *klass)
   g_signal_new ("set-focus", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr,
                 G_TYPE_NONE, 1, GTK_TYPE_WIDGET);
 
+  gtkqt_prop (klass, g_param_spec_enum ("type-hint", nullptr, nullptr, gdk_window_type_hint_get_type (), GDK_WINDOW_TYPE_HINT_NORMAL, RW),
+              [] (GObject *o, const GValue *v) { gtk_window_set_type_hint (GTK_WINDOW (o), (GdkWindowTypeHint) g_value_get_enum (v)); },
+              [] (GObject *o, GValue *v) { g_value_set_enum (v, gtk_window_get_type_hint (GTK_WINDOW (o))); });
   gtkqt_prop (klass, g_param_spec_string ("title", nullptr, nullptr, nullptr, RW),
               [] (GObject *o, const GValue *v) { gtk_window_set_title (GTK_WINDOW (o), g_value_get_string (v)); },
               [] (GObject *o, GValue *v) { g_value_set_string (v, GTK_WINDOW (o)->title); });
@@ -914,6 +917,12 @@ static void grid_place (GtkContainer *c, GtkWidget *child)
     if (p->xopts & GTK_EXPAND) for (int i = 0; i < p->grid_width; i++) l->setColumnStretch (p->grid_left + i, 1);
     if (p->yopts & GTK_EXPAND) for (int i = 0; i < p->grid_height; i++) l->setRowStretch (p->grid_top + i, 1);
   }
+  /* GTK's fill: the child takes the whole cell, also a widget Qt keeps at
+   * its own height (buttons spanning two rows) */
+  QSizePolicy sp = cw->sizePolicy ();
+  if (!(a & Qt::AlignVertical_Mask) && sp.verticalPolicy () == QSizePolicy::Fixed) sp.setVerticalPolicy (QSizePolicy::Preferred);
+  if (!(a & Qt::AlignHorizontal_Mask) && sp.horizontalPolicy () == QSizePolicy::Fixed) sp.setHorizontalPolicy (QSizePolicy::Preferred);
+  if (sp != cw->sizePolicy ()) cw->setSizePolicy (sp);
   l->addWidget (cw, p->grid_top, p->grid_left, p->grid_height, p->grid_width, a);
 }
 
@@ -2257,3 +2266,133 @@ void gtk_statusbar_remove_all (GtkStatusbar *sb, guint context_id)
 
 void gtk_statusbar_set_has_resize_grip (GtkStatusbar *, gboolean) {}
 }
+
+/* ======================================================================
+ * GtkSizeGroup: each member's minimum size becomes the largest natural
+ * size in the group (in the group's directions).
+ * ====================================================================== */
+struct _GtkSizeGroup {
+  GObject parent;
+  GtkSizeGroupMode mode;
+  gboolean ignore_hidden;
+  GSList *widgets;                       /* weak */
+  QObject *watcher;                      /* filters the members' Qt events */
+  bool pending;
+};
+typedef struct { GObjectClass parent_class; } GtkSizeGroupClass;
+G_DEFINE_TYPE (GtkSizeGroup, gtk_size_group, G_TYPE_OBJECT)
+
+static void size_group_apply (GtkSizeGroup *g)
+{
+  g->pending = false;
+  QSize best (0, 0);
+  QList<QWidget *> members;
+  for (GSList *l = g->widgets; l; l = l->next)
+    if (QWidget *qw = gtkqt_qw ((GtkWidget *) l->data)) {
+      members << qw;
+      if (g->ignore_hidden && !qw->isVisible ()) continue;
+      best = best.expandedTo (qw->sizeHint ());
+    }
+  for (QWidget *qw : members) {
+    QSize min = qw->minimumSize ();
+    if (g->mode == GTK_SIZE_GROUP_HORIZONTAL || g->mode == GTK_SIZE_GROUP_BOTH) min.setWidth (best.width ());
+    if (g->mode == GTK_SIZE_GROUP_VERTICAL || g->mode == GTK_SIZE_GROUP_BOTH) min.setHeight (best.height ());
+    if (min != qw->minimumSize ()) qw->setMinimumSize (min);
+  }
+}
+
+static void size_group_schedule (GtkSizeGroup *g)
+{
+  if (g->pending) return;
+  g->pending = true;
+  g_object_ref (g);
+  QTimer::singleShot (0, g->watcher, [g] { size_group_apply (g); g_object_unref (g); });
+}
+
+namespace {
+class SizeGroupWatcher : public QObject {
+public:
+  GtkSizeGroup *group;
+  explicit SizeGroupWatcher (GtkSizeGroup *g) : group (g) {}
+  bool eventFilter (QObject *, QEvent *e) override
+  {
+    switch (e->type ()) {
+    case QEvent::Show: case QEvent::Hide: case QEvent::FontChange: case QEvent::StyleChange:
+      size_group_schedule (group);
+      break;
+    default:
+      break;
+    }
+    return false;
+  }
+};
+}
+
+static void gtk_size_group_init (GtkSizeGroup *g)
+{
+  g->mode = GTK_SIZE_GROUP_HORIZONTAL;
+  gtkqt_ensure_app ();
+  g->watcher = new SizeGroupWatcher (g);
+}
+
+static void size_group_widget_gone (gpointer data, GObject *w)
+{
+  auto *g = (GtkSizeGroup *) data;
+  g->widgets = g_slist_remove (g->widgets, w);
+}
+
+static void size_group_finalize (GObject *o)
+{
+  auto *g = GTK_SIZE_GROUP (o);
+  for (GSList *l = g->widgets; l; l = l->next) g_object_weak_unref (G_OBJECT (l->data), size_group_widget_gone, g);
+  g_slist_free (g->widgets);
+  delete g->watcher;
+  G_OBJECT_CLASS (gtk_size_group_parent_class)->finalize (o);
+}
+
+static void gtk_size_group_class_init (GtkSizeGroupClass *klass)
+{
+  G_OBJECT_CLASS (klass)->finalize = size_group_finalize;
+  gtkqt_prop (klass, g_param_spec_int ("mode", nullptr, nullptr, 0, 3, GTK_SIZE_GROUP_HORIZONTAL, RW),
+              [] (GObject *o, const GValue *v) { gtk_size_group_set_mode (GTK_SIZE_GROUP (o), (GtkSizeGroupMode) g_value_get_int (v)); },
+              [] (GObject *o, GValue *v) { g_value_set_int (v, GTK_SIZE_GROUP (o)->mode); });
+}
+
+static const char *size_group_key (GtkSizeGroup *g)
+{
+  return g_intern_string (QByteArray ("gtkqt-size-group-").append (QByteArray::number ((quintptr) g, 16)).constData ());
+}
+
+extern "C" {
+GtkSizeGroup *gtk_size_group_new (GtkSizeGroupMode mode)
+{
+  auto *g = (GtkSizeGroup *) g_object_new (GTK_TYPE_SIZE_GROUP, nullptr);
+  g->mode = mode;
+  return g;
+}
+
+void gtk_size_group_set_mode (GtkSizeGroup *g, GtkSizeGroupMode mode) { g->mode = mode; size_group_schedule (g); }
+GtkSizeGroupMode gtk_size_group_get_mode (GtkSizeGroup *g) { return g->mode; }
+void gtk_size_group_set_ignore_hidden (GtkSizeGroup *g, gboolean v) { g->ignore_hidden = v; size_group_schedule (g); }
+GSList *gtk_size_group_get_widgets (GtkSizeGroup *g) { return g->widgets; }
+
+/* as in GTK, each member keeps the group alive */
+void gtk_size_group_add_widget (GtkSizeGroup *g, GtkWidget *widget)
+{
+  if (!g || !widget || g_slist_find (g->widgets, widget)) return;
+  g->widgets = g_slist_prepend (g->widgets, widget);
+  g_object_weak_ref (G_OBJECT (widget), size_group_widget_gone, g);
+  g_object_set_data_full (G_OBJECT (widget), size_group_key (g), g_object_ref (g), g_object_unref);
+  if (QWidget *qw = gtkqt_qw (widget)) qw->installEventFilter (g->watcher);
+  size_group_schedule (g);
+}
+
+void gtk_size_group_remove_widget (GtkSizeGroup *g, GtkWidget *widget)
+{
+  if (!g || !g_slist_find (g->widgets, widget)) return;
+  if (QWidget *qw = gtkqt_qw (widget)) qw->removeEventFilter (g->watcher);
+  g->widgets = g_slist_remove (g->widgets, widget);
+  g_object_weak_unref (G_OBJECT (widget), size_group_widget_gone, g);
+  g_object_set_data (G_OBJECT (widget), size_group_key (g), nullptr);
+}
+} /* extern "C" */

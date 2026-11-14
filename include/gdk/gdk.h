@@ -87,11 +87,20 @@ typedef enum {
   GDK_CONTROL_MASK = 1 << 2,
   GDK_MOD1_MASK    = 1 << 3,
   GDK_ALT_MASK     = GDK_MOD1_MASK,
+  GDK_MOD2_MASK    = 1 << 4,   /* Num Lock on X11 */
+  GDK_MOD3_MASK    = 1 << 5,
+  GDK_MOD4_MASK    = 1 << 6,
+  GDK_MOD5_MASK    = 1 << 7,
   GDK_BUTTON1_MASK = 1 << 8,
   GDK_BUTTON2_MASK = 1 << 9,
   GDK_BUTTON3_MASK = 1 << 10,
+  GDK_BUTTON4_MASK = 1 << 11,
+  GDK_BUTTON5_MASK = 1 << 12,
   GDK_SUPER_MASK   = 1 << 26,
-  GDK_META_MASK    = 1 << 28
+  GDK_HYPER_MASK   = 1 << 27,
+  GDK_META_MASK    = 1 << 28,
+  GDK_RELEASE_MASK = 1 << 30,
+  GDK_MODIFIER_MASK = 0x5c001fff
 } GdkModifierType;
 
 typedef enum {
@@ -456,6 +465,22 @@ void     gdk_window_get_geometry (GdkWindow *window, gint *x, gint *y, gint *wid
 void     gdk_window_get_position (GdkWindow *window, gint *x, gint *y);
 gint     gdk_window_get_origin (GdkWindow *window, gint *x, gint *y);
 GdkWindow *gdk_window_get_pointer (GdkWindow *window, gint *x, gint *y, GdkModifierType *mask);
+
+/* Devices (GTK 3): one pointer and one keyboard, Qt's */
+typedef struct _GdkSeat GdkSeat;
+typedef struct _GdkDeviceManager GdkDeviceManager;
+typedef enum { GDK_SOURCE_MOUSE, GDK_SOURCE_PEN, GDK_SOURCE_ERASER, GDK_SOURCE_CURSOR, GDK_SOURCE_KEYBOARD,
+               GDK_SOURCE_TOUCHSCREEN, GDK_SOURCE_TOUCHPAD, GDK_SOURCE_TRACKPOINT, GDK_SOURCE_TABLET_PAD } GdkInputSource;
+GdkWindow  *gdk_window_get_device_position (GdkWindow *window, GdkDevice *device, gint *x, gint *y, GdkModifierType *mask);
+void        gdk_device_get_position (GdkDevice *device, GdkScreen **screen, gint *x, gint *y);
+const gchar *gdk_device_get_name (GdkDevice *device);
+GdkInputSource gdk_device_get_source (GdkDevice *device);
+GdkDevice  *gdk_device_get_associated_device (GdkDevice *device);
+GdkSeat    *gdk_display_get_default_seat (GdkDisplay *display);
+GdkDevice  *gdk_seat_get_pointer (GdkSeat *seat);
+GdkDevice  *gdk_seat_get_keyboard (GdkSeat *seat);
+GdkDeviceManager *gdk_display_get_device_manager (GdkDisplay *display);
+GdkDevice  *gdk_device_manager_get_client_pointer (GdkDeviceManager *device_manager);
 void     gdk_window_clear (GdkWindow *window);
 void     gdk_window_clear_area (GdkWindow *window, gint x, gint y, gint width, gint height);
 void     gdk_window_clear_area_e (GdkWindow *window, gint x, gint y, gint width, gint height);

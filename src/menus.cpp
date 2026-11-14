@@ -408,8 +408,12 @@ static void gtk_menu_item_class_init (GtkMenuItemClass *klass)
               [] (GObject *o, GValue *v) { g_value_set_object (v, gtk_menu_item_get_submenu (GTK_MENU_ITEM (o))); });
   gtkqt_prop (klass, g_param_spec_string ("action-name", nullptr, nullptr, nullptr, RW),
               [] (GObject *o, const GValue *v) { gtk_actionable_set_action_name ((GtkActionable *) o, g_value_get_string (v)); }, nullptr);
+  /* GtkActivatable (GTK 2.16-3): Glade writes these; the GtkAction link is not kept */
+  gtkqt_prop (klass, g_param_spec_boolean ("use-action-appearance", nullptr, nullptr, TRUE, RW),
+              [] (GObject *, const GValue *) {}, nullptr);
+  gtkqt_prop (klass, g_param_spec_object ("related-action", nullptr, nullptr, G_TYPE_OBJECT, RW),
+              [] (GObject *, const GValue *) {}, nullptr);
 }
-
 static void menu_item_dispose (GObject *o)
 {
   if (GtkWidget *sub = (GtkWidget *) g_object_get_data (o, "gtkqt-submenu")) {
@@ -449,7 +453,13 @@ static void gtk_check_menu_item_class_init (GtkCheckMenuItemClass *klass)
 
 G_DEFINE_TYPE (GtkRadioMenuItem, gtk_radio_menu_item, GTK_TYPE_CHECK_MENU_ITEM)
 static void gtk_radio_menu_item_init (GtkRadioMenuItem *) {}
-static void gtk_radio_menu_item_class_init (GtkRadioMenuItemClass *) {}
+static void radio_menu_set_group_prop (GObject *o, const GValue *v);
+static void gtk_radio_menu_item_class_init (GtkRadioMenuItemClass *klass)
+{
+  /* GtkBuilder: <property name="group">first_item</property> */
+  gtkqt_prop (klass, g_param_spec_object ("group", nullptr, nullptr, GTK_TYPE_RADIO_MENU_ITEM, G_PARAM_WRITABLE),
+              radio_menu_set_group_prop, nullptr);
+}
 
 static QObject *separator_item_create (GtkWidget *)
 {
@@ -467,7 +477,24 @@ static void gtk_separator_menu_item_class_init (GtkSeparatorMenuItemClass *klass
 
 G_DEFINE_TYPE (GtkImageMenuItem, gtk_image_menu_item, GTK_TYPE_MENU_ITEM)
 static void gtk_image_menu_item_init (GtkImageMenuItem *) {}
-static void gtk_image_menu_item_class_init (GtkImageMenuItemClass *) {}
+static void image_menu_item_use_stock (GtkImageMenuItem *item, gboolean use_stock);
+static void gtk_image_menu_item_class_init (GtkImageMenuItemClass *klass)
+{
+  gtkqt_prop (klass, g_param_spec_object ("image", nullptr, nullptr, GTK_TYPE_WIDGET, RW),
+              [] (GObject *o, const GValue *v) { gtk_image_menu_item_set_image (GTK_IMAGE_MENU_ITEM (o), (GtkWidget *) g_value_get_object (v)); },
+              [] (GObject *o, GValue *v) { g_value_set_object (v, g_object_get_data (o, "gtkqt-image")); });
+  /* the label is a stock id (Glade's stock menu items) */
+  gtkqt_prop (klass, g_param_spec_boolean ("use-stock", nullptr, nullptr, FALSE, RW),
+              [] (GObject *o, const GValue *v) { image_menu_item_use_stock (GTK_IMAGE_MENU_ITEM (o), g_value_get_boolean (v)); }, nullptr);
+  gtkqt_prop (klass, g_param_spec_boolean ("always-show-image", nullptr, nullptr, FALSE, RW),
+              [] (GObject *, const GValue *) {}, nullptr);
+  gtkqt_prop (klass, g_param_spec_object ("accel-group", nullptr, nullptr, GTK_TYPE_ACCEL_GROUP, G_PARAM_WRITABLE),
+              [] (GObject *o, const GValue *v) {
+                auto *group = (GtkAccelGroup *) g_value_get_object (v);
+                g_object_set_data (o, "gtkqt-stock-accel-group", group);
+                if (g_object_get_data (o, "gtkqt-use-stock")) image_menu_item_use_stock (GTK_IMAGE_MENU_ITEM (o), TRUE);
+              }, nullptr);
+}
 
 /* Default accelerators of stock items, applied when an accel group is given */
 static const char *stock_accel (const gchar *stock_id)
@@ -587,6 +614,9 @@ void gtk_check_menu_item_set_active (GtkCheckMenuItem *item, gboolean is_active)
   g_signal_emit_by_name (item, "activate");
 }
 
+/* emits "toggled" without changing the state */
+void gtk_check_menu_item_toggled (GtkCheckMenuItem *item) { g_signal_emit_by_name (item, "toggled"); }
+
 gboolean gtk_check_menu_item_get_active (GtkCheckMenuItem *item)
 {
   auto *a = gtkqt_q<QAction> (GTK_WIDGET (item));
@@ -595,9 +625,8 @@ gboolean gtk_check_menu_item_get_active (GtkCheckMenuItem *item)
 
 void gtk_check_menu_item_set_draw_as_radio (GtkCheckMenuItem *, gboolean) {}
 
-static GtkWidget *radio_menu_item_new (GSList *group)
+static void radio_menu_join (GtkWidget *w, GSList *group)
 {
-  GtkWidget *w = (GtkWidget *) g_object_new (GTK_TYPE_RADIO_MENU_ITEM, nullptr);
   RadioMenuGroup *g = group ? static_cast<RadioMenuGroup *> (g_object_get_data (G_OBJECT (group->data), "gtkqt-radio-menu-group")) : nullptr;
   if (!g) {
     g = new RadioMenuGroup;
@@ -612,8 +641,38 @@ static GtkWidget *radio_menu_item_new (GSList *group)
   if (auto *a = gtkqt_q<QAction> (w)) {
     g->qgroup->addAction (a);
     if (first) a->setChecked (true);
+    else if (a->isChecked ()) a->setChecked (false);   /* the group's choice stays */
   }
+}
+
+static void radio_menu_detach (GtkWidget *w)
+{
+  auto *g = static_cast<RadioMenuGroup *> (g_object_get_data (G_OBJECT (w), "gtkqt-radio-menu-group"));
+  if (!g) return;
+  if (auto *a = gtkqt_q<QAction> (w)) g->qgroup->removeAction (a);
+  g_object_weak_unref (G_OBJECT (w), radio_menu_leave, g);
+  g_object_set_data (G_OBJECT (w), "gtkqt-radio-menu-group", nullptr);
+  radio_menu_leave (g, G_OBJECT (w));
+}
+
+static GtkWidget *radio_menu_item_new (GSList *group)
+{
+  GtkWidget *w = (GtkWidget *) g_object_new (GTK_TYPE_RADIO_MENU_ITEM, nullptr);
+  radio_menu_join (w, group);
   return w;
+}
+
+void gtk_radio_menu_item_set_group (GtkRadioMenuItem *item, GSList *group)
+{
+  GtkWidget *w = GTK_WIDGET (item);
+  if (group && g_slist_find (group, w)) return;
+  radio_menu_detach (w);
+  radio_menu_join (w, group);
+}
+
+void gtk_radio_menu_item_join_group (GtkRadioMenuItem *item, GtkRadioMenuItem *group_source)
+{
+  gtk_radio_menu_item_set_group (item, group_source ? gtk_radio_menu_item_get_group (group_source) : nullptr);
 }
 
 GtkWidget *gtk_radio_menu_item_new_with_label (GSList *group, const gchar *label)
@@ -633,6 +692,9 @@ GtkWidget *gtk_radio_menu_item_new_with_mnemonic (GSList *group, const gchar *la
 
 GSList *gtk_radio_menu_item_get_group (GtkRadioMenuItem *item)
 {
+  /* every radio item is in a group, at least its own (one made by
+   * GtkBuilder or g_object_new gets it here) */
+  if (!g_object_get_data (G_OBJECT (item), "gtkqt-radio-menu-group")) radio_menu_join (GTK_WIDGET (item), nullptr);
   auto *g = static_cast<RadioMenuGroup *> (g_object_get_data (G_OBJECT (item), "gtkqt-radio-menu-group"));
   return g ? g->members : nullptr;
 }
@@ -672,8 +734,20 @@ GtkWidget *gtk_image_menu_item_new_with_mnemonic (const gchar *label)
 void gtk_image_menu_item_set_image (GtkImageMenuItem *item, GtkWidget *image)
 {
   auto *a = gtkqt_q<QAction> (GTK_WIDGET (item));
+  if (image) g_object_ref_sink (image);
+  g_object_set_data_full (G_OBJECT (item), "gtkqt-image", image, image ? g_object_unref : nullptr);
   auto *l = image ? gtkqt_q<QLabel> (image) : nullptr;
-  if (a && l) a->setIcon (QIcon (l->pixmap (Qt::ReturnByValue)));
+  if (!a) return;
+  if (!l) { a->setIcon (QIcon ()); return; }
+  QPixmap pm = l->pixmap (Qt::ReturnByValue);
+  /* an image from a stock id or icon name is the icon itself, at any size */
+  if (const char *name = (const char *) g_object_get_data (G_OBJECT (image), "gtkqt-icon-name")) a->setIcon (gtkqt_icon (name));
+  else if (!pm.isNull ()) a->setIcon (QIcon (pm));
+}
+
+GtkWidget *gtk_image_menu_item_get_image (GtkImageMenuItem *item)
+{
+  return (GtkWidget *) g_object_get_data (G_OBJECT (item), "gtkqt-image");
 }
 
 } /* extern "C" */
@@ -1135,3 +1209,32 @@ void gtk_tool_item_set_expand (GtkToolItem *tool_item, gboolean expand)
 void gtk_tool_item_set_is_important (GtkToolItem *, gboolean) {}
 
 } /* extern "C" */
+
+static void radio_menu_set_group_prop (GObject *o, const GValue *v)
+{
+  auto *src = (GtkRadioMenuItem *) g_value_get_object (v);
+  gtk_radio_menu_item_join_group (GTK_RADIO_MENU_ITEM (o), src);
+}
+
+/* use-stock: the label names a stock item, which gives text, icon and
+ * (with an accel group) its standard accelerator */
+static void image_menu_item_use_stock (GtkImageMenuItem *item, gboolean use_stock)
+{
+  g_object_set_data (G_OBJECT (item), "gtkqt-use-stock", GINT_TO_POINTER (use_stock ? 1 : 0));
+  auto *a = gtkqt_q<QAction> (GTK_WIDGET (item));
+  if (!use_stock || !a) return;
+  const gchar *id = (const gchar *) g_object_get_data (G_OBJECT (item), "gtkqt-stock-id");
+  QByteArray label = gtk_menu_item_get_label (GTK_MENU_ITEM (item)) ? QByteArray (gtk_menu_item_get_label (GTK_MENU_ITEM (item))) : QByteArray ();
+  if (!id) {
+    if (gtkqt_stock_label (label.constData ()).isEmpty ()) return;
+    g_object_set_data_full (G_OBJECT (item), "gtkqt-stock-id", g_strdup (label.constData ()), g_free);
+    id = (const gchar *) g_object_get_data (G_OBJECT (item), "gtkqt-stock-id");
+  }
+  QString text = gtkqt_stock_label (id);
+  a->setText (gtkqt_mnemonic (text.toUtf8 ().constData ()));
+  if (a->icon ().isNull ()) a->setIcon (gtkqt_icon (id));
+  if (auto *group = (GtkAccelGroup *) g_object_get_data (G_OBJECT (item), "gtkqt-stock-accel-group")) {
+    if (const char *accel = stock_accel (id)) a->setShortcut (gtkqt_accel_to_keyseq (accel));
+    gtkqt_accel_group_add_action (group, a);
+  }
+}

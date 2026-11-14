@@ -45,3 +45,10 @@ set_tests_properties(x11 PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 gtkqt_add_program(test-asunder ${CMAKE_CURRENT_SOURCE_DIR}/test-asunder.c 2)
 add_test(NAME asunder COMMAND test-asunder)
 set_tests_properties(asunder PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
+
+# A GtkBuilder program of the GTK 2 era (Galculator): builder accelerators,
+# toggle button click order, radio menu groups, keysyms, tag tables ...
+gtkqt_add_program(test-galculator ${CMAKE_CURRENT_SOURCE_DIR}/test-galculator.c 2)
+target_link_options(test-galculator PRIVATE -rdynamic)   # gtk_builder_connect_signals finds the handlers
+add_test(NAME galculator COMMAND test-galculator)
+set_tests_properties(galculator PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)

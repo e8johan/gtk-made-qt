@@ -1252,7 +1252,7 @@ void gtk_accel_group_connect (GtkAccelGroup *group, guint key, GdkModifierType m
   g_closure_ref (closure);
   g_closure_sink (closure);
   if (!closure->marshal) g_closure_set_marshal (closure, g_cclosure_marshal_generic);
-  act->setProperty ("gtkqt-closure", QVariant::fromValue ((void *) closure));
+  gtkqt_accel_set_info (act, closure, group, key, mods);
   QObject::connect (act, &QAction::triggered, act, [group, key, mods, closure] {
     GtkQtEmitGuard guard;
     GValue params[4] = { G_VALUE_INIT, G_VALUE_INIT, G_VALUE_INIT, G_VALUE_INIT };
@@ -1400,6 +1400,8 @@ gchar **gtk_selection_data_get_uris (const GtkSelectionData *d)
 const guchar *gtk_selection_data_get_data (const GtkSelectionData *d) { return d ? d->data : nullptr; }
 gint gtk_selection_data_get_length (const GtkSelectionData *d) { return d ? d->length : -1; }
 GdkAtom gtk_selection_data_get_target (const GtkSelectionData *d) { return d ? d->target : GDK_NONE; }
+GdkAtom gtk_selection_data_get_data_type (const GtkSelectionData *d) { return d ? d->type : GDK_NONE; }
+gint gtk_selection_data_get_format (const GtkSelectionData *d) { return d ? d->format : 0; }
 
 } /* extern "C" */
 
@@ -2346,3 +2348,77 @@ extern "C" {
 GtkAdjustment *gtk_scrolled_window_get_hadjustment (GtkScrolledWindow *sw) { return scroll_adjustment (sw, false); }
 GtkAdjustment *gtk_scrolled_window_get_vadjustment (GtkScrolledWindow *sw) { return scroll_adjustment (sw, true); }
 }
+
+/* ======================================================================
+ * GTK 3 overrides, on the GTK 2 modify_* calls; devices
+ * ====================================================================== */
+static GtkStateType state_of_flags (GtkStateFlags f)
+{
+  if (f & GTK_STATE_FLAG_INSENSITIVE) return GTK_STATE_INSENSITIVE;
+  if (f & GTK_STATE_FLAG_SELECTED) return GTK_STATE_SELECTED;
+  if (f & GTK_STATE_FLAG_PRELIGHT) return GTK_STATE_PRELIGHT;
+  if (f & GTK_STATE_FLAG_ACTIVE) return GTK_STATE_ACTIVE;
+  return GTK_STATE_NORMAL;
+}
+
+static GdkColor color_of_rgba (const GdkRGBA *c)
+{
+  GdkColor g = { 0, (guint16) qRound (c->red * 65535), (guint16) qRound (c->green * 65535), (guint16) qRound (c->blue * 65535) };
+  return g;
+}
+
+struct _GdkDevice { const char *name; GdkInputSource source; };
+struct _GdkSeat { int unused; };
+struct _GdkDeviceManager { int unused; };
+static GdkDevice core_pointer = { "Core Pointer", GDK_SOURCE_MOUSE };
+static GdkDevice core_keyboard = { "Core Keyboard", GDK_SOURCE_KEYBOARD };
+static GdkSeat default_seat;
+static GdkDeviceManager device_manager;
+
+extern "C" {
+void gtk_widget_override_font (GtkWidget *widget, const PangoFontDescription *font_desc)
+{
+  gtk_widget_modify_font (widget, (PangoFontDescription *) font_desc);
+}
+
+/* GTK 3's colour is the text's: of labels (fg) and of entries and views (text) */
+void gtk_widget_override_color (GtkWidget *widget, GtkStateFlags state, const GdkRGBA *color)
+{
+  GdkColor c;
+  if (color) c = color_of_rgba (color);
+  gtk_widget_modify_fg (widget, state_of_flags (state), color ? &c : nullptr);
+  gtk_widget_modify_text (widget, state_of_flags (state), color ? &c : nullptr);
+}
+
+void gtk_widget_override_background_color (GtkWidget *widget, GtkStateFlags state, const GdkRGBA *color)
+{
+  GdkColor c;
+  if (color) c = color_of_rgba (color);
+  gtk_widget_modify_bg (widget, state_of_flags (state), color ? &c : nullptr);
+  gtk_widget_modify_base (widget, state_of_flags (state), color ? &c : nullptr);
+}
+
+GdkDevice *gtk_get_current_event_device (void) { return &core_pointer; }
+
+GdkWindow *gdk_window_get_device_position (GdkWindow *window, GdkDevice *, gint *x, gint *y, GdkModifierType *mask)
+{
+  return gdk_window_get_pointer (window, x, y, mask);
+}
+
+void gdk_device_get_position (GdkDevice *, GdkScreen **screen, gint *x, gint *y)
+{
+  QPoint p = QCursor::pos ();
+  if (screen) *screen = gdk_screen_get_default ();
+  if (x) *x = p.x ();
+  if (y) *y = p.y ();
+}
+
+const gchar *gdk_device_get_name (GdkDevice *d) { return d ? d->name : nullptr; }
+GdkInputSource gdk_device_get_source (GdkDevice *d) { return d ? d->source : GDK_SOURCE_MOUSE; }
+GdkDevice *gdk_device_get_associated_device (GdkDevice *d) { return d == &core_pointer ? &core_keyboard : &core_pointer; }
+GdkSeat *gdk_display_get_default_seat (GdkDisplay *) { return &default_seat; }
+GdkDevice *gdk_seat_get_pointer (GdkSeat *) { return &core_pointer; }
+GdkDevice *gdk_seat_get_keyboard (GdkSeat *) { return &core_keyboard; }
+GdkDeviceManager *gdk_display_get_device_manager (GdkDisplay *) { return &device_manager; }
+GdkDevice *gdk_device_manager_get_client_pointer (GdkDeviceManager *) { return &core_pointer; }
+} /* extern "C" */

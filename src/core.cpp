@@ -56,6 +56,16 @@ GTKQT_ENUM (gtk_selection_mode_get_type, "GtkSelectionMode", EV (GTK_SELECTION_N
 GTKQT_ENUM (gtk_window_position_get_type, "GtkWindowPosition", EV (GTK_WIN_POS_NONE, "none"),
             EV (GTK_WIN_POS_CENTER, "center"), EV (GTK_WIN_POS_MOUSE, "mouse"),
             EV (GTK_WIN_POS_CENTER_ALWAYS, "center-always"), EV (GTK_WIN_POS_CENTER_ON_PARENT, "center-on-parent"))
+GTKQT_ENUM (gdk_window_type_hint_get_type, "GdkWindowTypeHint", EV (GDK_WINDOW_TYPE_HINT_NORMAL, "normal"),
+            EV (GDK_WINDOW_TYPE_HINT_DIALOG, "dialog"), EV (GDK_WINDOW_TYPE_HINT_MENU, "menu"),
+            EV (GDK_WINDOW_TYPE_HINT_TOOLBAR, "toolbar"), EV (GDK_WINDOW_TYPE_HINT_SPLASHSCREEN, "splashscreen"),
+            EV (GDK_WINDOW_TYPE_HINT_UTILITY, "utility"), EV (GDK_WINDOW_TYPE_HINT_DOCK, "dock"),
+            EV (GDK_WINDOW_TYPE_HINT_DESKTOP, "desktop"), EV (GDK_WINDOW_TYPE_HINT_DROPDOWN_MENU, "dropdown-menu"),
+            EV (GDK_WINDOW_TYPE_HINT_POPUP_MENU, "popup-menu"), EV (GDK_WINDOW_TYPE_HINT_TOOLTIP, "tooltip"),
+            EV (GDK_WINDOW_TYPE_HINT_NOTIFICATION, "notification"), EV (GDK_WINDOW_TYPE_HINT_COMBO, "combo"),
+            EV (GDK_WINDOW_TYPE_HINT_DND, "dnd"))
+GTKQT_ENUM (gtk_arrow_type_get_type, "GtkArrowType", EV (GTK_ARROW_UP, "up"), EV (GTK_ARROW_DOWN, "down"),
+            EV (GTK_ARROW_LEFT, "left"), EV (GTK_ARROW_RIGHT, "right"), EV (GTK_ARROW_NONE, "none"))
 GTKQT_ENUM (gtk_shadow_type_get_type, "GtkShadowType", EV (GTK_SHADOW_NONE, "none"), EV (GTK_SHADOW_IN, "in"),
             EV (GTK_SHADOW_OUT, "out"), EV (GTK_SHADOW_ETCHED_IN, "etched-in"), EV (GTK_SHADOW_ETCHED_OUT, "etched-out"))
 GTKQT_ENUM (gtk_relief_style_get_type, "GtkReliefStyle", EV (GTK_RELIEF_NORMAL, "normal"),
@@ -497,14 +507,54 @@ QKeySequence gtkqt_accel_to_keyseq (const gchar *accel)
     else if (k == "super" || k == "meta") out += "Meta+";
     s = s.mid (m.capturedLength ());
   }
-  static const QMap<QString, QString> names = {
-    { "Return", "Return" }, { "KP_Enter", "Enter" }, { "Escape", "Esc" }, { "BackSpace", "Backspace" },
-    { "Delete", "Del" }, { "Insert", "Ins" }, { "Page_Up", "PgUp" }, { "Page_Down", "PgDown" },
-    { "plus", "+" }, { "minus", "-" }, { "equal", "=" }, { "comma", "," }, { "period", "." },
-    { "slash", "/" }, { "question", "?" }, { "space", "Space" }, { "Tab", "Tab" },
+  QKeySequence mods_only (out + QStringLiteral ("A"));
+  int mod_bits = 0;
+#if QT_VERSION >= QT_VERSION_CHECK (6, 0, 0)
+  if (!mods_only.isEmpty ()) mod_bits = mods_only[0].keyboardModifiers ().toInt ();
+#else
+  if (!mods_only.isEmpty ()) mod_bits = mods_only[0] & Qt::KeyboardModifierMask;
+#endif
+  int key = gtkqt_keyval_to_qt_key (gdk_keyval_from_name (s.toUtf8 ().constData ()));
+  if (!key) {
+    /* not a keysym name: Qt's own spelling ("F5", "Del" ...) */
+    QKeySequence q (out + s);
+    return q;
+  }
+  return QKeySequence (mod_bits | key);
+}
+
+/* a GDK keyval as a Qt key (with Qt::KeypadModifier for keypad keys); 0 if none */
+int gtkqt_keyval_to_qt_key (guint keyval)
+{
+  if (!keyval) return 0;
+  static const QMap<guint, int> special = {
+    { GDK_KEY_BackSpace, Qt::Key_Backspace }, { GDK_KEY_Tab, Qt::Key_Tab }, { GDK_KEY_ISO_Left_Tab, Qt::Key_Backtab },
+    { GDK_KEY_Return, Qt::Key_Return }, { GDK_KEY_Escape, Qt::Key_Escape }, { GDK_KEY_Delete, Qt::Key_Delete },
+    { GDK_KEY_Insert, Qt::Key_Insert }, { GDK_KEY_Home, Qt::Key_Home }, { GDK_KEY_End, Qt::Key_End },
+    { GDK_KEY_Left, Qt::Key_Left }, { GDK_KEY_Right, Qt::Key_Right }, { GDK_KEY_Up, Qt::Key_Up },
+    { GDK_KEY_Down, Qt::Key_Down }, { GDK_KEY_Page_Up, Qt::Key_PageUp }, { GDK_KEY_Page_Down, Qt::Key_PageDown },
+    { GDK_KEY_Pause, Qt::Key_Pause }, { GDK_KEY_Print, Qt::Key_Print }, { GDK_KEY_Menu, Qt::Key_Menu },
+    { GDK_KEY_Help, Qt::Key_Help }, { GDK_KEY_space, Qt::Key_Space },
+    /* the keypad: Qt marks these keys with KeypadModifier */
+    { GDK_KEY_KP_Enter, Qt::KeypadModifier | Qt::Key_Enter }, { GDK_KEY_KP_Add, Qt::KeypadModifier | Qt::Key_Plus },
+    { GDK_KEY_KP_Subtract, Qt::KeypadModifier | Qt::Key_Minus }, { GDK_KEY_KP_Multiply, Qt::KeypadModifier | Qt::Key_Asterisk },
+    { GDK_KEY_KP_Divide, Qt::KeypadModifier | Qt::Key_Slash }, { GDK_KEY_KP_Decimal, Qt::KeypadModifier | Qt::Key_Period },
+    { GDK_KEY_KP_Separator, Qt::KeypadModifier | Qt::Key_Comma }, { GDK_KEY_KP_Equal, Qt::KeypadModifier | Qt::Key_Equal },
+    { GDK_KEY_KP_Home, Qt::KeypadModifier | Qt::Key_Home }, { GDK_KEY_KP_End, Qt::KeypadModifier | Qt::Key_End },
+    { GDK_KEY_KP_Left, Qt::KeypadModifier | Qt::Key_Left }, { GDK_KEY_KP_Right, Qt::KeypadModifier | Qt::Key_Right },
+    { GDK_KEY_KP_Up, Qt::KeypadModifier | Qt::Key_Up }, { GDK_KEY_KP_Down, Qt::KeypadModifier | Qt::Key_Down },
+    { GDK_KEY_KP_Page_Up, Qt::KeypadModifier | Qt::Key_PageUp }, { GDK_KEY_KP_Page_Down, Qt::KeypadModifier | Qt::Key_PageDown },
+    { GDK_KEY_KP_Insert, Qt::KeypadModifier | Qt::Key_Insert }, { GDK_KEY_KP_Delete, Qt::KeypadModifier | Qt::Key_Delete },
   };
-  out += names.value (s, s.size () == 1 ? s.toUpper () : s);
-  return QKeySequence (out);
+  auto it = special.find (keyval);
+  if (it != special.end ()) return *it;
+  if (keyval >= GDK_KEY_KP_0 && keyval <= GDK_KEY_KP_9) return Qt::KeypadModifier | (Qt::Key_0 + int (keyval - GDK_KEY_KP_0));
+  if (keyval >= GDK_KEY_F1 && keyval <= GDK_KEY_F24) return Qt::Key_F1 + int (keyval - GDK_KEY_F1);
+  guint32 uc = gdk_keyval_to_unicode (keyval);
+  if (uc < 0x20) return 0;
+  /* Qt's key codes are the upper-case characters */
+  QString ch = QString::fromUcs4 (reinterpret_cast<const char32_t *> (&uc), 1).toUpper ();
+  return ch.size () == 1 ? ch[0].unicode () : int (uc);
 }
 
 /* ======================================================================
@@ -801,6 +851,12 @@ static void gtk_widget_class_init (GtkWidgetClass *klass)
   widget_signals[SIG_MOTION] = sigev ("motion-notify-event", G_STRUCT_OFFSET (GtkWidgetClass, motion_notify_event));
   widget_signals[SIG_DELETE] = sigev ("delete-event", G_STRUCT_OFFSET (GtkWidgetClass, delete_event));
   widget_signals[SIG_KEY_PRESS] = sigev ("key-press-event", G_STRUCT_OFFSET (GtkWidgetClass, key_press_event));
+  /* may an accelerator of the widget fire? (GTK: when it is sensitive and shown) */
+  g_signal_new_class_handler ("can-activate-accel", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST,
+                              G_CALLBACK (+[] (GtkWidget *w, guint) -> gboolean {
+                                return gtk_widget_is_sensitive (w) && gtk_widget_get_visible (w);
+                              }),
+                              g_signal_accumulator_true_handled, nullptr, nullptr, G_TYPE_BOOLEAN, 1, G_TYPE_UINT);
   widget_signals[SIG_KEY_RELEASE] = sigev ("key-release-event", G_STRUCT_OFFSET (GtkWidgetClass, key_release_event));
   widget_signals[SIG_ENTER] = sigev ("enter-notify-event", G_STRUCT_OFFSET (GtkWidgetClass, enter_notify_event));
   widget_signals[SIG_LEAVE] = sigev ("leave-notify-event", G_STRUCT_OFFSET (GtkWidgetClass, leave_notify_event));
@@ -1651,7 +1707,26 @@ void gtk_widget_add_accelerator (GtkWidget *widget, const gchar *accel_signal, G
   auto *act = new QAction (o);
   act->setShortcut (seq);
   QByteArray sig = accel_signal;
-  gtkqt_connect (widget, act, &QAction::triggered, [sig] (GtkWidget *w, bool) { g_signal_emit_by_name (w, sig.constData ()); });
+  gtkqt_connect (widget, act, &QAction::triggered, [sig] (GtkWidget *w, bool) {
+    gboolean can = FALSE;
+    g_signal_emit_by_name (w, "can-activate-accel", g_signal_lookup (sig.constData (), G_OBJECT_TYPE (w)), &can);
+    if (can) g_signal_emit_by_name (w, sig.constData ());
+  });
+  /* GTK identifies the accelerator by a closure that emits the signal
+   * (gtk_widget_list_accel_closures, gtk_accel_group_find) */
+  GClosure *closure = g_cclosure_new_object (G_CALLBACK (+[] (GObject *w) {
+                                               if (auto *s = (const char *) g_object_get_data (w, "gtkqt-accel-signal"))
+                                                 g_signal_emit_by_name (w, s);
+                                             }), G_OBJECT (widget));
+  g_object_set_data_full (G_OBJECT (widget), "gtkqt-accel-signal", g_strdup (accel_signal), g_free);
+  g_closure_ref (closure);
+  g_closure_sink (closure);
+  gtkqt_accel_set_info (act, closure, accel_group, accel_key, accel_mods);
+  auto *list = (GList *) g_object_steal_data (G_OBJECT (widget), "gtkqt-accel-closures");
+  list = g_list_append (list, closure);
+  g_object_set_data_full (G_OBJECT (widget), "gtkqt-accel-closures", list, [] (gpointer l) {
+    g_list_free_full ((GList *) l, (GDestroyNotify) g_closure_unref);
+  });
   if (accel_group) gtkqt_accel_group_add_action (accel_group, act);
   else if (QWidget *qw = qobject_cast<QWidget *> (o)) qw->addAction (act);
 }
@@ -1830,6 +1905,7 @@ void gtkqt_container_adopt (GtkContainer *container, GtkWidget *child)
   if (place) place (container, child);
   gtkqt_sync_visible (child);
   g_object_notify (G_OBJECT (child), "parent");
+  if (gtkqt_builder_accels_waiting) gtkqt_builder_accels_retry ();
 }
 
 void gtkqt_container_release (GtkContainer *container, GtkWidget *child)
@@ -2045,3 +2121,105 @@ const gchar *atk_action_get_name (AtkAction *, gint) { return nullptr; }
 const gchar *atk_action_get_description (AtkAction *, gint) { return nullptr; }
 gboolean atk_action_set_description (AtkAction *, gint, const gchar *) { return FALSE; }
 }
+
+/* ======================================================================
+ * Key snoopers (GTK 2): called with every key event before accelerators
+ * and the focus widget. Presses are offered at Qt's ShortcutOverride stage
+ * (before shortcuts); a snooper returning TRUE eats the key.
+ * ====================================================================== */
+namespace {
+struct Snooper { guint id; GtkKeySnoopFunc func; gpointer data; };
+QList<Snooper> s_snoopers;
+guint s_snooper_next = 1;
+
+class SnoopFilter : public QObject {
+public:
+  bool swallow_next_press = false;
+  bool eventFilter (QObject *o, QEvent *e) override
+  {
+    QEvent::Type t = e->type ();
+    if (t != QEvent::ShortcutOverride && t != QEvent::KeyPress && t != QEvent::KeyRelease) return false;
+    auto *qw = qobject_cast<QWidget *> (o);
+    /* the event passes every parent on its way up: snoop where it starts */
+    QWidget *focus = QApplication::focusWidget ();
+    if (!qw || (focus ? focus != qw : !qw->isWindow ())) return false;
+    if (t == QEvent::KeyPress) {
+      bool eat = swallow_next_press;
+      swallow_next_press = false;
+      return eat;
+    }
+    if (s_snoopers.isEmpty ()) return false;
+    GtkWidget *w = nullptr;
+    for (QObject *p = qw; p && !w; p = p->parent ()) w = gtkqt_from_qobject (p);
+    if (!w) return false;
+    auto *ke = static_cast<QKeyEvent *> (e);
+    QByteArray txt = ke->text ().toUtf8 ();
+    GdkEventKey ev = {};
+    ev.type = t == QEvent::KeyRelease ? GDK_KEY_RELEASE : GDK_KEY_PRESS;
+    ev.window = w->window;
+    ev.time = ke->timestamp ();
+    ev.state = gtkqt_qt_mods_to_gdk (ke->modifiers (), Qt::NoButton);
+    ev.keyval = gtkqt_qt_key_to_keyval (ke->key (), ke->text (), ke->modifiers ());
+    ev.hardware_keycode = (guint16) ke->nativeScanCode ();
+    ev.string = txt.data ();
+    ev.length = txt.size ();
+    GtkQtEmitGuard guard;
+    GtkWidget *grab = gtk_widget_get_toplevel (w);
+    g_object_ref (grab);
+    bool eaten = false;
+    for (const Snooper &s : QList<Snooper> (s_snoopers))
+      if (s.func (grab, &ev, s.data)) { eaten = true; break; }
+    g_object_unref (grab);
+    if (!eaten) return false;
+    if (t == QEvent::ShortcutOverride) {
+      e->accept ();               /* no shortcut ... */
+      swallow_next_press = true;  /* ... and no key press */
+    }
+    return true;
+  }
+};
+SnoopFilter *s_snoop_filter;
+}
+
+extern "C" {
+guint gtk_key_snooper_install (GtkKeySnoopFunc snooper, gpointer func_data)
+{
+  gtkqt_ensure_app ();
+  if (!s_snoop_filter) {
+    s_snoop_filter = new SnoopFilter;
+    s_snoop_filter->setParent (qApp);
+    qApp->installEventFilter (s_snoop_filter);
+  }
+  s_snoopers << Snooper { s_snooper_next, snooper, func_data };
+  return s_snooper_next++;
+}
+
+void gtk_key_snooper_remove (guint id)
+{
+  for (int i = 0; i < s_snoopers.size (); i++)
+    if (s_snoopers[i].id == id) { s_snoopers.removeAt (i); return; }
+}
+
+/* the name an object had in its builder file (GtkBuilder sets it) */
+void gtk_buildable_set_name (GtkBuildable *b, const gchar *name)
+{
+  g_object_set_data_full (G_OBJECT (b), "gtk-builder-name", g_strdup (name), g_free);
+}
+const gchar *gtk_buildable_get_name (GtkBuildable *b)
+{
+  return b ? (const gchar *) g_object_get_data (G_OBJECT (b), "gtk-builder-name") : nullptr;
+}
+
+void gtk_widget_get_pointer (GtkWidget *widget, gint *x, gint *y)
+{
+  QWidget *qw = gtkqt_qw (widget);
+  QPoint p = qw ? qw->mapFromGlobal (QCursor::pos ()) : QPoint (-1, -1);
+  if (x) *x = p.x ();
+  if (y) *y = p.y ();
+}
+
+void gtk_widget_get_child_requisition (GtkWidget *widget, GtkRequisition *req)
+{
+  gtk_widget_size_request (widget, req);
+}
+} /* extern "C" */
