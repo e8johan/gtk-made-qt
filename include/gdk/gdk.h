@@ -78,7 +78,12 @@ typedef enum {
   GDK_CLIENT_EVENT = 28,
   GDK_VISIBILITY_NOTIFY = 29,
   GDK_NO_EXPOSE = 30,
-  GDK_SCROLL = 31
+  GDK_SCROLL = 31,
+  GDK_WINDOW_STATE = 32,
+  GDK_SETTING = 33,
+  GDK_OWNER_CHANGE = 34,
+  GDK_GRAB_BROKEN = 35,
+  GDK_DAMAGE = 36
 } GdkEventType;
 
 typedef enum {
@@ -119,6 +124,11 @@ typedef enum {
   GDK_LEAVE_NOTIFY_MASK        = 1 << 13,
   GDK_FOCUS_CHANGE_MASK        = 1 << 14,
   GDK_STRUCTURE_MASK           = 1 << 15,
+  GDK_PROPERTY_CHANGE_MASK     = 1 << 16,
+  GDK_VISIBILITY_NOTIFY_MASK   = 1 << 17,
+  GDK_PROXIMITY_IN_MASK        = 1 << 18,
+  GDK_PROXIMITY_OUT_MASK       = 1 << 19,
+  GDK_SUBSTRUCTURE_MASK        = 1 << 20,
   GDK_SCROLL_MASK              = 1 << 21,
   GDK_SMOOTH_SCROLL_MASK       = 1 << 23,
   GDK_ALL_EVENTS_MASK          = 0x3FFFFFE
@@ -255,6 +265,34 @@ typedef struct {
   guint32 time;
 } GdkEventSelection;
 
+typedef enum {
+  GDK_VISIBILITY_UNOBSCURED, GDK_VISIBILITY_PARTIAL, GDK_VISIBILITY_FULLY_OBSCURED
+} GdkVisibilityState;
+typedef struct {
+  GdkEventType type;
+  GdkWindow *window;
+  gint8 send_event;
+  GdkVisibilityState state;
+} GdkEventVisibility;
+
+typedef enum {
+  GDK_WINDOW_STATE_WITHDRAWN = 1 << 0,
+  GDK_WINDOW_STATE_ICONIFIED = 1 << 1,
+  GDK_WINDOW_STATE_MAXIMIZED = 1 << 2,
+  GDK_WINDOW_STATE_STICKY = 1 << 3,
+  GDK_WINDOW_STATE_FULLSCREEN = 1 << 4,
+  GDK_WINDOW_STATE_ABOVE = 1 << 5,
+  GDK_WINDOW_STATE_BELOW = 1 << 6,
+  GDK_WINDOW_STATE_FOCUSED = 1 << 7
+} GdkWindowState;
+typedef struct {
+  GdkEventType type;
+  GdkWindow *window;
+  gint8 send_event;
+  GdkWindowState changed_mask;
+  GdkWindowState new_window_state;
+} GdkEventWindowState;
+
 typedef union _GdkEvent {
   GdkEventType type;
   GdkEventAny any;
@@ -268,6 +306,8 @@ typedef union _GdkEvent {
   GdkEventConfigure configure;
   GdkEventClient client;
   GdkEventSelection selection;
+  GdkEventVisibility visibility;
+  GdkEventWindowState window_state;
 } GdkEvent;
 
 #define GDK_TYPE_EVENT (gdk_event_get_type ())
@@ -310,13 +350,8 @@ int      gdk_window_get_height (GdkWindow *window);
 void     gdk_window_invalidate_rect (GdkWindow *window, const GdkRectangle *rect, gboolean invalidate_children);
 cairo_surface_t *gdk_window_create_similar_surface (GdkWindow *window, cairo_content_t content, int width, int height);
 
-/* Pixbufs (minimal: load from file, scale, query size) */
-#define GDK_TYPE_PIXBUF (gdk_pixbuf_get_type ())
-GType      gdk_pixbuf_get_type (void);
-GdkPixbuf *gdk_pixbuf_new_from_file (const char *filename, GError **error);
-GdkPixbuf *gdk_pixbuf_new_from_file_at_size (const char *filename, int width, int height, GError **error);
-int        gdk_pixbuf_get_width (const GdkPixbuf *pixbuf);
-int        gdk_pixbuf_get_height (const GdkPixbuf *pixbuf);
+/* Pixbufs: see gdk/gdkqt-pixbuf.h */
+#include <gdk/gdkqt-pixbuf.h>
 void       gdk_cairo_set_source_pixbuf (cairo_t *cr, const GdkPixbuf *pixbuf, double pixbuf_x, double pixbuf_y);
 
 /* Display / screen (just enough for common queries) */

@@ -209,7 +209,14 @@ void gtkqt_window_before_show (GtkWidget *w)
     }
     if (best) best->setFocus (Qt::TabFocusReason);
   });
-  qw->adjustSize ();
+  /* the window's full request, as GTK sizes it (adjustSize stops at 2/3
+   * of the screen); only the screen itself limits it */
+  QSize want = qw->sizeHint ().expandedTo (qw->minimumSizeHint ());
+  if (!want.isValid ()) qw->adjustSize ();
+  else {
+    if (QScreen *scr = qw->screen ()) want = want.boundedTo (scr->availableGeometry ().size ());
+    qw->resize (want.expandedTo (qw->minimumSize ()));
+  }
   QSize sz = qw->size ();
   if (d->default_w > 0 || d->default_h > 0) {
     QSize hint = qw->sizeHint ().expandedTo (qw->minimumSizeHint ());
@@ -803,12 +810,14 @@ void gtk_box_reorder_child (GtkBox *box, GtkWidget *child, gint position)
   p->children = g_list_remove (p->children, child);
   p->children = g_list_insert (p->children, child, position);
   box_rebuild (GTK_WIDGET (box));
+  gtkqt_sync_public_children (GTK_WIDGET (box));
 }
 
 void gtk_box_set_homogeneous (GtkBox *box, gboolean homogeneous)
 {
   box_data (GTK_WIDGET (box))->homogeneous = homogeneous;
   box_rebuild (GTK_WIDGET (box));
+  box->homogeneous = homogeneous != FALSE;
 }
 
 gboolean gtk_box_get_homogeneous (GtkBox *box) { return box_data (GTK_WIDGET (box))->homogeneous; }
@@ -817,6 +826,7 @@ void gtk_box_set_spacing (GtkBox *box, gint spacing)
 {
   box_data (GTK_WIDGET (box))->spacing = spacing;
   box_rebuild (GTK_WIDGET (box));
+  box->spacing = (gint16) spacing;
 }
 
 gint gtk_box_get_spacing (GtkBox *box) { return box_data (GTK_WIDGET (box))->spacing; }
@@ -828,6 +838,7 @@ void gtk_box_set_child_packing (GtkBox *box, GtkWidget *child, gboolean expand, 
   child->priv->pack_padding = padding;
   child->priv->pack_type = pack_type;
   box_rebuild (GTK_WIDGET (box));
+  gtkqt_sync_public_children (GTK_WIDGET (box));
 }
 
 void gtk_box_query_child_packing (GtkBox *, GtkWidget *child, gboolean *expand, gboolean *fill, guint *padding, GtkPackType *pack_type)
@@ -1065,14 +1076,20 @@ static void grid_shift (GtkGrid *grid, bool rows, gint position)
 void gtk_grid_insert_row (GtkGrid *grid, gint position) { grid_shift (grid, true, position); }
 void gtk_grid_insert_column (GtkGrid *grid, gint position) { grid_shift (grid, false, position); }
 
-GtkWidget *gtk_table_new (guint, guint, gboolean homogeneous)
+GtkWidget *gtk_table_new (guint rows, guint columns, gboolean homogeneous)
 {
   GtkWidget *w = (GtkWidget *) g_object_new (GTK_TYPE_TABLE, nullptr);
+  gtk_table_resize (GTK_TABLE (w), rows, columns);
   gtk_table_set_homogeneous (GTK_TABLE (w), homogeneous);
   return w;
 }
 
-void gtk_table_resize (GtkTable *, guint, guint) {}
+/* the grid grows with its children; the size is what programs read back */
+void gtk_table_resize (GtkTable *table, guint rows, guint columns)
+{
+  table->nrows = qMax (1u, rows);
+  table->ncols = qMax (1u, columns);
+}
 
 void gtk_table_attach (GtkTable *table, GtkWidget *child, guint left_attach, guint right_attach,
                        guint top_attach, guint bottom_attach, GtkAttachOptions xoptions,
@@ -1087,6 +1104,8 @@ void gtk_table_attach (GtkTable *table, GtkWidget *child, guint left_attach, gui
   p->grid_height = qMax (1, (int) bottom_attach - (int) top_attach);
   p->xopts = xoptions;
   p->yopts = yoptions;
+  table->nrows = qMax ((guint) table->nrows, bottom_attach);
+  table->ncols = qMax ((guint) table->ncols, right_attach);
   gtkqt_container_adopt (GTK_CONTAINER (table), child);
 }
 
@@ -1097,13 +1116,22 @@ void gtk_table_attach_defaults (GtkTable *table, GtkWidget *widget, guint left_a
                     (GtkAttachOptions) (GTK_EXPAND | GTK_FILL), (GtkAttachOptions) (GTK_EXPAND | GTK_FILL), 0, 0);
 }
 
-void gtk_table_set_row_spacings (GtkTable *table, guint spacing) { if (auto *l = grid_layout (GTK_WIDGET (table))) l->setVerticalSpacing (spacing); }
-void gtk_table_set_col_spacings (GtkTable *table, guint spacing) { if (auto *l = grid_layout (GTK_WIDGET (table))) l->setHorizontalSpacing (spacing); }
+void gtk_table_set_row_spacings (GtkTable *table, guint spacing)
+{
+  table->row_spacing = spacing;
+  if (auto *l = grid_layout (GTK_WIDGET (table))) l->setVerticalSpacing (spacing);
+}
+void gtk_table_set_col_spacings (GtkTable *table, guint spacing)
+{
+  table->column_spacing = spacing;
+  if (auto *l = grid_layout (GTK_WIDGET (table))) l->setHorizontalSpacing (spacing);
+}
 void gtk_table_set_row_spacing (GtkTable *table, guint, guint spacing) { gtk_table_set_row_spacings (table, spacing); }
 void gtk_table_set_col_spacing (GtkTable *table, guint, guint spacing) { gtk_table_set_col_spacings (table, spacing); }
 
 void gtk_table_set_homogeneous (GtkTable *table, gboolean homogeneous)
 {
+  table->homogeneous = homogeneous;
   if (auto *l = grid_layout (GTK_WIDGET (table))) {
     for (int r = 0; r < 64; r++) l->setRowStretch (r, homogeneous ? 1 : 0);
     for (int c = 0; c < 64; c++) l->setColumnStretch (c, homogeneous ? 1 : 0);

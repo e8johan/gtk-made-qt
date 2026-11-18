@@ -1218,6 +1218,8 @@ GdkPixbuf *gtk_icon_theme_load_icon (GtkIconTheme *, const gchar *icon_name, gin
 {
   gtkqt_ensure_app ();
   QIcon icon = QIcon::fromTheme (gtkqt_str (icon_name));
+  /* GTK's theme has the stock icons ("gtk-find" ...) built in */
+  if (icon.isNull () && icon_name && g_str_has_prefix (icon_name, "gtk-")) icon = gtkqt_icon (icon_name);
   if (icon.isNull ()) {
     g_set_error (error, g_quark_from_static_string ("gtk-icon-theme-error-quark"), 0, "Icon '%s' not present in theme", icon_name);
     return nullptr;
@@ -1718,17 +1720,22 @@ void gtk_item_factory_create_item (GtkItemFactory *f, GtkItemFactoryEntry *entry
   gtk_widget_show (item);
   g_object_set_data (G_OBJECT (item), "gtkqt-item-factory", f);
 
-  if (entry->accelerator && *entry->accelerator && !submenu) {
-    guint key; GdkModifierType mods;
-    gtk_accelerator_parse (entry->accelerator, &key, &mods);
-    if (key) gtk_widget_add_accelerator (item, "activate", f->accel_group, key, mods, GTK_ACCEL_VISIBLE);
+  /* the item's accelerator is its accel path's entry in the accel map */
+  QString key = if_strip (path);
+  if (!submenu && type != "<Separator>") {
+    QByteArray apath = (QString::fromUtf8 (f->path ? f->path : "") + key).toUtf8 ();
+    if (entry->accelerator && *entry->accelerator) {
+      guint k; GdkModifierType mods;
+      gtk_accelerator_parse (entry->accelerator, &k, &mods);
+      if (k) gtk_accel_map_add_entry (apath.constData (), k, mods);
+    }
+    gtkqt_accel_path_attach (item, apath.constData (), f->accel_group);
   }
   if (entry->callback && !submenu && type != "<Separator>") {
     auto *c = new IfCallback { entry->callback, callback_data, entry->callback_action, callback_type };
     g_signal_connect_data (item, "activate", G_CALLBACK (if_activate), c,
                            [] (gpointer p, GClosure *) { delete static_cast<IfCallback *> (p); }, (GConnectFlags) 0);
   }
-  QString key = if_strip (path);
   ifd (f)->items << IfItem { key, item, submenu, entry->callback_action };
   g_object_set_data_full (G_OBJECT (item), "gtkqt-item-path", g_strdup (key.toUtf8 ().constData ()), g_free);
   f->items = g_slist_append (f->items, item);
@@ -2315,17 +2322,14 @@ void gtk_viewport_set_shadow_type (GtkViewport *viewport, GtkShadowType type)
 
 } /* extern "C" */
 
-/* GtkScrolledWindow adjustments, kept in step with the Qt scroll bars */
-static GtkAdjustment *scroll_adjustment (GtkScrolledWindow *sw, bool vertical)
+/* a GtkAdjustment kept in step with a Qt scroll bar (both ways), owned by
+ * owner under key (scrolled windows, text views) */
+GtkAdjustment *gtkqt_scrollbar_adjustment (GObject *owner, const char *key, QScrollBar *sb)
 {
-  const char *key = vertical ? "gtkqt-vadj" : "gtkqt-hadj";
-  if (auto *a = (GtkAdjustment *) g_object_get_data (G_OBJECT (sw), key)) return a;
+  if (auto *a = (GtkAdjustment *) g_object_get_data (owner, key)) return a;
   auto *adj = (GtkAdjustment *) g_object_ref_sink (gtk_adjustment_new (0, 0, 0, 1, 10, 0));
-  g_object_set_data_full (G_OBJECT (sw), key, adj, g_object_unref);
-  QWidget *qw = gtkqt_qw (GTK_WIDGET (sw));
-  QAbstractScrollArea *area = qw ? qw->findChild<QAbstractScrollArea *> (QString (), Qt::FindDirectChildrenOnly) : nullptr;
-  if (!area) return adj;
-  QScrollBar *sb = vertical ? area->verticalScrollBar () : area->horizontalScrollBar ();
+  g_object_set_data_full (owner, key, adj, g_object_unref);
+  if (!sb) return adj;
   auto sync = [adj, sb] {
     g_object_set_data (G_OBJECT (adj), "gtkqt-syncing", GINT_TO_POINTER (1));
     gtk_adjustment_configure (adj, sb->value (), sb->minimum (), sb->maximum () + sb->pageStep (), sb->singleStep (),
@@ -2342,6 +2346,15 @@ static GtkAdjustment *scroll_adjustment (GtkScrolledWindow *sw, bool vertical)
     if (*g) (*g)->setValue ((int) std::lround (gtk_adjustment_get_value (a)));
   }), new QPointer<QScrollBar> (guard), [] (gpointer p, GClosure *) { delete static_cast<QPointer<QScrollBar> *> (p); }, (GConnectFlags) 0);
   return adj;
+}
+
+/* GtkScrolledWindow adjustments, kept in step with the Qt scroll bars */
+static GtkAdjustment *scroll_adjustment (GtkScrolledWindow *sw, bool vertical)
+{
+  QWidget *qw = gtkqt_qw (GTK_WIDGET (sw));
+  QAbstractScrollArea *area = qw ? qw->findChild<QAbstractScrollArea *> (QString (), Qt::FindDirectChildrenOnly) : nullptr;
+  QScrollBar *sb = area ? (vertical ? area->verticalScrollBar () : area->horizontalScrollBar ()) : nullptr;
+  return gtkqt_scrollbar_adjustment (G_OBJECT (sw), vertical ? "gtkqt-vadj" : "gtkqt-hadj", sb);
 }
 
 extern "C" {
@@ -2421,4 +2434,533 @@ GdkDevice *gdk_seat_get_pointer (GdkSeat *) { return &core_pointer; }
 GdkDevice *gdk_seat_get_keyboard (GdkSeat *) { return &core_keyboard; }
 GdkDeviceManager *gdk_display_get_device_manager (GdkDisplay *) { return &device_manager; }
 GdkDevice *gdk_device_manager_get_client_pointer (GdkDeviceManager *) { return &core_pointer; }
+} /* extern "C" */
+
+/* ======================================================================
+ * Key bindings: GtkBindingSet
+ * ====================================================================== */
+namespace {
+struct BindingEntry {
+  guint keyval;
+  guint mods;
+  QByteArray signal;
+  QList<QPair<GType, QVariant>> args;   /* G_TYPE_LONG, G_TYPE_DOUBLE or G_TYPE_STRING */
+  bool skip = false;
+};
+struct BindingSetData { QList<BindingEntry> entries; };
+QHash<QByteArray, GtkBindingSet *> &binding_sets () { static QHash<QByteArray, GtkBindingSet *> h; return h; }
+QHash<GType, GtkBindingSet *> &class_binding_sets () { static QHash<GType, GtkBindingSet *> h; return h; }
+BindingSetData *bsd (GtkBindingSet *s) { return static_cast<BindingSetData *> (s->gtkqt_priv); }
+const guint binding_mods = GDK_SHIFT_MASK | GDK_CONTROL_MASK | GDK_MOD1_MASK | GDK_SUPER_MASK | GDK_HYPER_MASK | GDK_META_MASK;
+
+void binding_remove (GtkBindingSet *s, guint keyval, guint mods)
+{
+  keyval = gdk_keyval_to_lower (keyval);
+  mods &= binding_mods;
+  QList<BindingEntry> &l = bsd (s)->entries;
+  for (int i = l.size () - 1; i >= 0; i--)
+    if (l[i].keyval == keyval && l[i].mods == mods) l.removeAt (i);
+}
+
+/* emit an entry's signal, converting its arguments to the signal's types */
+bool binding_emit (GObject *o, const BindingEntry &e)
+{
+  guint id = g_signal_lookup (e.signal.constData (), G_OBJECT_TYPE (o));
+  if (!id) return false;
+  GSignalQuery q;
+  g_signal_query (id, &q);
+  if (q.n_params != (guint) e.args.size ()) return false;
+  QVector<GValue> params (q.n_params + 1);
+  for (GValue &v : params) v = G_VALUE_INIT;
+  g_value_init (&params[0], G_OBJECT_TYPE (o));
+  g_value_set_object (&params[0], o);
+  bool ok = true;
+  for (guint i = 0; i < q.n_params && ok; i++) {
+    GValue src = G_VALUE_INIT;
+    const auto &a = e.args[i];
+    g_value_init (&src, a.first);
+    if (a.first == G_TYPE_LONG) g_value_set_long (&src, a.second.toLongLong ());
+    else if (a.first == G_TYPE_DOUBLE) g_value_set_double (&src, a.second.toDouble ());
+    else g_value_set_string (&src, a.second.toByteArray ().constData ());
+    GType want = q.param_types[i] & ~G_SIGNAL_TYPE_STATIC_SCOPE;
+    g_value_init (&params[i + 1], want);
+    if (G_TYPE_IS_ENUM (want) && a.first == G_TYPE_LONG) g_value_set_enum (&params[i + 1], (gint) a.second.toLongLong ());
+    else if (G_TYPE_IS_FLAGS (want) && a.first == G_TYPE_LONG) g_value_set_flags (&params[i + 1], (guint) a.second.toLongLong ());
+    else ok = g_value_transform (&src, &params[i + 1]);
+    g_value_unset (&src);
+  }
+  if (ok) {
+    GValue ret = G_VALUE_INIT;
+    if (q.return_type != G_TYPE_NONE) g_value_init (&ret, q.return_type & ~G_SIGNAL_TYPE_STATIC_SCOPE);
+    g_signal_emitv (params.data (), id, 0, q.return_type != G_TYPE_NONE ? &ret : nullptr);
+    if (G_IS_VALUE (&ret)) g_value_unset (&ret);
+  }
+  for (GValue &v : params) if (G_IS_VALUE (&v)) g_value_unset (&v);
+  return ok;
+}
+}
+
+extern "C" {
+
+GtkBindingSet *gtk_binding_set_new (const gchar *set_name)
+{
+  auto *s = g_new0 (GtkBindingSet, 1);
+  s->set_name = g_strdup (set_name);
+  s->gtkqt_priv = new BindingSetData;
+  binding_sets ().insert (QByteArray (set_name), s);
+  return s;
+}
+
+GtkBindingSet *gtk_binding_set_find (const gchar *set_name) { return binding_sets ().value (QByteArray (set_name)); }
+
+GtkBindingSet *gtk_binding_set_by_class (gpointer object_class)
+{
+  GType t = G_TYPE_FROM_CLASS (object_class);
+  if (GtkBindingSet *s = class_binding_sets ().value (t)) return s;
+  GtkBindingSet *s = gtk_binding_set_new (g_type_name (t));
+  class_binding_sets ().insert (t, s);
+  return s;
+}
+
+void gtk_binding_entry_add_signal (GtkBindingSet *s, guint keyval, GdkModifierType mods, const gchar *signal_name, guint n_args, ...)
+{
+  g_return_if_fail (s && signal_name);
+  BindingEntry e { gdk_keyval_to_lower (keyval), (guint) mods & binding_mods, QByteArray (signal_name), {} };
+  va_list ap;
+  va_start (ap, n_args);
+  for (guint i = 0; i < n_args; i++) {
+    GType t = va_arg (ap, GType);
+    switch (G_TYPE_FUNDAMENTAL (t)) {
+    case G_TYPE_CHAR: case G_TYPE_UCHAR: case G_TYPE_INT: case G_TYPE_UINT: case G_TYPE_BOOLEAN:
+    case G_TYPE_ENUM: case G_TYPE_FLAGS:
+      e.args << qMakePair (G_TYPE_LONG, QVariant ((qlonglong) va_arg (ap, gint)));
+      break;
+    case G_TYPE_LONG: case G_TYPE_ULONG:
+      e.args << qMakePair (G_TYPE_LONG, QVariant ((qlonglong) va_arg (ap, glong)));
+      break;
+    case G_TYPE_FLOAT: case G_TYPE_DOUBLE:
+      e.args << qMakePair (G_TYPE_DOUBLE, QVariant (va_arg (ap, gdouble)));
+      break;
+    case G_TYPE_STRING:
+      e.args << qMakePair (G_TYPE_STRING, QVariant (QByteArray (va_arg (ap, const gchar *))));
+      break;
+    default:
+      g_warning ("gtk_binding_entry_add_signal: unsupported argument type %s", g_type_name (t));
+      va_end (ap);
+      return;
+    }
+  }
+  va_end (ap);
+  binding_remove (s, keyval, mods);
+  bsd (s)->entries << e;
+}
+
+void gtk_binding_entry_add_signall (GtkBindingSet *s, guint keyval, GdkModifierType mods, const gchar *signal_name, GSList *args)
+{
+  /* GtkBindingArg: { GType arg_type; union { glong long_data; gdouble double_data; gchar *string_data; } d; } */
+  struct Arg { GType arg_type; union { glong long_data; gdouble double_data; gchar *string_data; } d; };
+  BindingEntry e { gdk_keyval_to_lower (keyval), (guint) mods & binding_mods, QByteArray (signal_name), {} };
+  for (GSList *l = args; l; l = l->next) {
+    auto *a = static_cast<Arg *> (l->data);
+    if (G_TYPE_FUNDAMENTAL (a->arg_type) == G_TYPE_DOUBLE || G_TYPE_FUNDAMENTAL (a->arg_type) == G_TYPE_FLOAT)
+      e.args << qMakePair (G_TYPE_DOUBLE, QVariant (a->d.double_data));
+    else if (G_TYPE_FUNDAMENTAL (a->arg_type) == G_TYPE_STRING)
+      e.args << qMakePair (G_TYPE_STRING, QVariant (QByteArray (a->d.string_data)));
+    else
+      e.args << qMakePair (G_TYPE_LONG, QVariant ((qlonglong) a->d.long_data));
+  }
+  binding_remove (s, keyval, mods);
+  bsd (s)->entries << e;
+}
+
+void gtk_binding_entry_remove (GtkBindingSet *s, guint keyval, GdkModifierType mods) { if (s) binding_remove (s, keyval, mods); }
+void gtk_binding_entry_clear (GtkBindingSet *s, guint keyval, GdkModifierType mods) { gtk_binding_entry_remove (s, keyval, mods); }
+
+/* a skip entry stops the search in parent classes' sets */
+void gtk_binding_entry_skip (GtkBindingSet *s, guint keyval, GdkModifierType mods)
+{
+  if (!s) return;
+  binding_remove (s, keyval, mods);
+  BindingEntry e { gdk_keyval_to_lower (keyval), (guint) mods & binding_mods, QByteArray (), {} };
+  e.skip = true;
+  bsd (s)->entries << e;
+}
+
+gboolean gtk_bindings_activate (GObject *object, guint keyval, GdkModifierType modifiers)
+{
+  keyval = gdk_keyval_to_lower (keyval);
+  guint mods = (guint) modifiers & binding_mods;
+  for (GType t = G_OBJECT_TYPE (object); t; t = g_type_parent (t)) {
+    GtkBindingSet *s = class_binding_sets ().value (t);
+    if (!s) continue;
+    for (const BindingEntry &e : bsd (s)->entries)
+      if (e.keyval == keyval && e.mods == mods) return e.skip ? FALSE : binding_emit (object, e);
+  }
+  return FALSE;
+}
+
+gboolean gtk_bindings_activate_event (GObject *object, GdkEventKey *event)
+{
+  return event && gtk_bindings_activate (object, event->keyval, (GdkModifierType) event->state);
+}
+
+} /* extern "C" */
+
+gboolean gtkqt_bindings_activate (GtkWidget *widget, guint keyval, guint state)
+{
+  if (class_binding_sets ().isEmpty ()) return FALSE;
+  return gtk_bindings_activate (G_OBJECT (widget), keyval, (GdkModifierType) state);
+}
+
+/* ======================================================================
+ * GtkStatusIcon on QSystemTrayIcon: a click activates, the context click
+ * asks for the program's popup menu, blinking swaps the icon on a timer
+ * ====================================================================== */
+namespace {
+struct StatusIconData {
+  QSystemTrayIcon *tray = nullptr;
+  QTimer *blink = nullptr;
+  QIcon icon;
+  GdkPixbuf *pixbuf = nullptr;
+  bool blink_off = false;
+  bool visible = true;
+};
+StatusIconData *sid (gpointer o) { return static_cast<StatusIconData *> (((GtkStatusIcon *) o)->priv); }
+void status_icon_show (GtkStatusIcon *s)
+{
+  StatusIconData *d = sid (s);
+  d->tray->setIcon (d->blink_off ? QIcon () : d->icon);
+  d->tray->setVisible (d->visible && !d->icon.isNull ());
+}
+}
+
+G_DEFINE_TYPE (GtkStatusIcon, gtk_status_icon, G_TYPE_OBJECT)
+
+static void gtk_status_icon_init (GtkStatusIcon *s)
+{
+  gtkqt_ensure_app ();
+  auto *d = new StatusIconData;
+  s->priv = d;
+  d->tray = new QSystemTrayIcon;
+  QObject::connect (d->tray, &QSystemTrayIcon::activated, d->tray, [s] (QSystemTrayIcon::ActivationReason r) {
+    if (r == QSystemTrayIcon::Trigger || r == QSystemTrayIcon::DoubleClick) g_signal_emit_by_name (s, "activate");
+    else if (r == QSystemTrayIcon::Context) g_signal_emit_by_name (s, "popup-menu", 3u, 0u);
+  });
+}
+
+static void status_icon_finalize (GObject *o)
+{
+  StatusIconData *d = sid (o);
+  delete d->blink;
+  delete d->tray;
+  if (d->pixbuf) g_object_unref (d->pixbuf);
+  delete d;
+  G_OBJECT_CLASS (gtk_status_icon_parent_class)->finalize (o);
+}
+
+static void gtk_status_icon_class_init (GtkStatusIconClass *klass)
+{
+  G_OBJECT_CLASS (klass)->finalize = status_icon_finalize;
+  GType t = G_TYPE_FROM_CLASS (klass);
+  g_signal_new ("activate", t, (GSignalFlags) (G_SIGNAL_RUN_FIRST | G_SIGNAL_ACTION), 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
+  g_signal_new ("popup-menu", t, (GSignalFlags) (G_SIGNAL_RUN_FIRST | G_SIGNAL_ACTION), 0, nullptr, nullptr, nullptr,
+                G_TYPE_NONE, 2, G_TYPE_UINT, G_TYPE_UINT);
+  g_signal_new ("size-changed", t, G_SIGNAL_RUN_LAST, 0, g_signal_accumulator_true_handled, nullptr, nullptr, G_TYPE_BOOLEAN, 1, G_TYPE_INT);
+}
+
+extern "C" {
+
+GtkStatusIcon *gtk_status_icon_new (void) { return (GtkStatusIcon *) g_object_new (GTK_TYPE_STATUS_ICON, nullptr); }
+GtkStatusIcon *gtk_status_icon_new_from_pixbuf (GdkPixbuf *pixbuf) { auto *s = gtk_status_icon_new (); gtk_status_icon_set_from_pixbuf (s, pixbuf); return s; }
+GtkStatusIcon *gtk_status_icon_new_from_file (const gchar *filename) { auto *s = gtk_status_icon_new (); gtk_status_icon_set_from_file (s, filename); return s; }
+GtkStatusIcon *gtk_status_icon_new_from_stock (const gchar *stock_id) { auto *s = gtk_status_icon_new (); gtk_status_icon_set_from_stock (s, stock_id); return s; }
+GtkStatusIcon *gtk_status_icon_new_from_icon_name (const gchar *name) { auto *s = gtk_status_icon_new (); gtk_status_icon_set_from_icon_name (s, name); return s; }
+
+static void status_icon_set (GtkStatusIcon *s, const QIcon &icon, GdkPixbuf *pixbuf)
+{
+  StatusIconData *d = sid (s);
+  d->icon = icon;
+  if (pixbuf) g_object_ref (pixbuf);
+  if (d->pixbuf) g_object_unref (d->pixbuf);
+  d->pixbuf = pixbuf;
+  status_icon_show (s);
+}
+
+void gtk_status_icon_set_from_pixbuf (GtkStatusIcon *s, GdkPixbuf *pixbuf)
+{
+  status_icon_set (s, pixbuf ? QIcon (QPixmap::fromImage (gtkqt_pixbuf_image (pixbuf))) : QIcon (), pixbuf);
+}
+void gtk_status_icon_set_from_file (GtkStatusIcon *s, const gchar *filename) { status_icon_set (s, QIcon (gtkqt_str (filename)), nullptr); }
+void gtk_status_icon_set_from_stock (GtkStatusIcon *s, const gchar *stock_id) { status_icon_set (s, gtkqt_icon (stock_id), nullptr); }
+void gtk_status_icon_set_from_icon_name (GtkStatusIcon *s, const gchar *name) { status_icon_set (s, gtkqt_icon (name), nullptr); }
+void gtk_status_icon_set_tooltip (GtkStatusIcon *s, const gchar *text) { sid (s)->tray->setToolTip (gtkqt_str (text)); }
+void gtk_status_icon_set_tooltip_text (GtkStatusIcon *s, const gchar *text) { gtk_status_icon_set_tooltip (s, text); }
+void gtk_status_icon_set_title (GtkStatusIcon *, const gchar *) {}
+void gtk_status_icon_set_visible (GtkStatusIcon *s, gboolean visible) { sid (s)->visible = visible; status_icon_show (s); }
+gboolean gtk_status_icon_get_visible (GtkStatusIcon *s) { return sid (s)->visible; }
+
+void gtk_status_icon_set_blinking (GtkStatusIcon *s, gboolean blinking)
+{
+  StatusIconData *d = sid (s);
+  if (blinking && !d->blink) {
+    d->blink = new QTimer;
+    QObject::connect (d->blink, &QTimer::timeout, d->blink, [s] { sid (s)->blink_off = !sid (s)->blink_off; status_icon_show (s); });
+    d->blink->start (500);
+  } else if (!blinking && d->blink) {
+    delete d->blink;
+    d->blink = nullptr;
+    d->blink_off = false;
+    status_icon_show (s);
+  }
+}
+gboolean gtk_status_icon_get_blinking (GtkStatusIcon *s) { return sid (s)->blink != nullptr; }
+gboolean gtk_status_icon_is_embedded (GtkStatusIcon *s) { return QSystemTrayIcon::isSystemTrayAvailable () && sid (s)->tray->isVisible (); }
+gint gtk_status_icon_get_size (GtkStatusIcon *) { return 22; }
+GdkPixbuf *gtk_status_icon_get_pixbuf (GtkStatusIcon *s) { return sid (s)->pixbuf; }
+
+/* the menu pops up at the pointer, which is over the icon */
+void gtk_status_icon_position_menu (GtkMenu *, gint *x, gint *y, gboolean *push_in, gpointer)
+{
+  QPoint p = QCursor::pos ();
+  if (x) *x = p.x ();
+  if (y) *y = p.y ();
+  if (push_in) *push_in = TRUE;
+}
+
+} /* extern "C" */
+
+/* ======================================================================
+ * GtkAccelMap
+ * ====================================================================== */
+namespace {
+struct AccelEntry { guint key = 0; guint mods = 0; guint def_key = 0; guint def_mods = 0; bool changed = false; bool locked = false; };
+QMap<QByteArray, AccelEntry> &accel_map () { static QMap<QByteArray, AccelEntry> m; return m; }
+QMultiHash<QByteArray, GtkWidget *> &accel_items () { static QMultiHash<QByteArray, GtkWidget *> h; return h; }
+
+/* give the item the path's accelerator (it replaces the one it had) */
+void accel_apply (GtkWidget *item, const AccelEntry &e)
+{
+  auto *group = (GtkAccelGroup *) g_object_get_data (G_OBJECT (item), "gtkqt-accel-group");
+  guint old_key = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (item), "gtkqt-accel-key"));
+  guint old_mods = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (item), "gtkqt-accel-mods"));
+  if (old_key) gtk_widget_remove_accelerator (item, group, old_key, (GdkModifierType) old_mods);
+  if (e.key) gtk_widget_add_accelerator (item, "activate", group, e.key, (GdkModifierType) e.mods, GTK_ACCEL_VISIBLE);
+  g_object_set_data (G_OBJECT (item), "gtkqt-accel-key", GUINT_TO_POINTER (e.key));
+  g_object_set_data (G_OBJECT (item), "gtkqt-accel-mods", GUINT_TO_POINTER (e.mods));
+}
+
+void accel_changed (const QByteArray &path)
+{
+  const AccelEntry e = accel_map ().value (path);
+  for (GtkWidget *w : accel_items ().values (path)) accel_apply (w, e);
+}
+}
+
+void gtkqt_accel_path_attach (GtkWidget *item, const gchar *path, GtkAccelGroup *group)
+{
+  if (!item || !path) return;
+  QByteArray p (path);
+  if (group) g_object_set_data (G_OBJECT (item), "gtkqt-accel-group", group);
+  if (!g_object_get_data (G_OBJECT (item), "gtkqt-accel-path")) {
+    accel_items ().insert (p, item);
+    auto *key = new QByteArray (p);
+    g_object_set_data_full (G_OBJECT (item), "gtkqt-accel-path", key, [] (gpointer) {});
+    g_object_weak_ref (G_OBJECT (item), [] (gpointer data, GObject *o) {
+      auto *k = static_cast<QByteArray *> (data);
+      accel_items ().remove (*k, (GtkWidget *) o);
+      delete k;
+    }, key);
+  }
+  if (accel_map ().contains (p)) accel_apply (item, accel_map ().value (p));
+}
+
+extern "C" {
+
+void gtk_widget_set_accel_path (GtkWidget *widget, const gchar *path, GtkAccelGroup *group) { gtkqt_accel_path_attach (widget, path, group); }
+
+void gtk_accel_map_add_entry (const gchar *path, guint key, GdkModifierType mods)
+{
+  QByteArray p (path);
+  if (accel_map ().contains (p)) return;
+  AccelEntry e;
+  e.key = e.def_key = key;
+  e.mods = e.def_mods = mods & GDK_MODIFIER_MASK;
+  accel_map ().insert (p, e);
+  accel_changed (p);
+}
+
+gboolean gtk_accel_map_lookup_entry (const gchar *path, GtkAccelKey *key)
+{
+  auto it = accel_map ().constFind (QByteArray (path));
+  if (it == accel_map ().constEnd ()) return FALSE;
+  if (key) { key->accel_key = it->key; key->accel_mods = (GdkModifierType) it->mods; key->accel_flags = GTK_ACCEL_VISIBLE; }
+  return TRUE;
+}
+
+/* with replace, other paths using the key lose it (GTK asks the same) */
+gboolean gtk_accel_map_change_entry (const gchar *path, guint key, GdkModifierType mods, gboolean replace)
+{
+  QByteArray p (path);
+  AccelEntry &e = accel_map ()[p];
+  if (e.locked) return FALSE;
+  mods = (GdkModifierType) (mods & GDK_MODIFIER_MASK);
+  if (key) {
+    for (auto it = accel_map ().begin (); it != accel_map ().end (); ++it)
+      if (it.key () != p && it->key == key && it->mods == (guint) mods) {
+        if (!replace || it->locked) return FALSE;
+        it->key = 0;
+        it->mods = 0;
+        it->changed = true;
+        accel_changed (it.key ());
+      }
+  }
+  e.key = key;
+  e.mods = mods;
+  e.changed = key != e.def_key || (guint) mods != e.def_mods;
+  accel_changed (p);
+  return TRUE;
+}
+
+/* lines like  (gtk_accel_path "<Main>/File/Quit" "<Control>q"); ";" comments */
+void gtk_accel_map_load (const gchar *file_name)
+{
+  gchar *text = nullptr;
+  if (!file_name || !g_file_get_contents (file_name, &text, nullptr, nullptr)) return;
+  static const QRegularExpression re (QStringLiteral ("^\\s*\\(gtk_accel_path\\s+\"((?:[^\"\\\\]|\\\\.)*)\"\\s+\"((?:[^\"\\\\]|\\\\.)*)\"\\s*\\)"));
+  for (const QString &line : QString::fromUtf8 (text).split ('\n')) {
+    QRegularExpressionMatch m = re.match (line);
+    if (!m.hasMatch ()) continue;
+    QByteArray path = m.captured (1).replace (QStringLiteral ("\\\""), QStringLiteral ("\"")).toUtf8 ();
+    guint key = 0;
+    GdkModifierType mods = (GdkModifierType) 0;
+    gtk_accelerator_parse (m.captured (2).toUtf8 ().constData (), &key, &mods);
+    if (!accel_map ().contains (path)) {
+      AccelEntry e;
+      accel_map ().insert (path, e);
+    }
+    gtk_accel_map_change_entry (path.constData (), key, mods, TRUE);
+  }
+  g_free (text);
+}
+
+void gtk_accel_map_save (const gchar *file_name)
+{
+  if (!file_name) return;
+  QByteArray out = "; " + QByteArray (g_get_prgname () ? g_get_prgname () : "") + " GtkAccelMap rc-file         -*- scheme -*-\n"
+                   "; this file is an automated accelerator map dump\n;\n";
+  for (auto it = accel_map ().constBegin (); it != accel_map ().constEnd (); ++it) {
+    gchar *name = gtk_accelerator_name (it->key, (GdkModifierType) it->mods);
+    QByteArray path = it.key ();
+    path.replace ("\"", "\\\"");
+    out += QByteArray (it->changed ? "" : "; ") + "(gtk_accel_path \"" + path + "\" \"" + QByteArray (name ? name : "") + "\")\n";
+    g_free (name);
+  }
+  g_file_set_contents (file_name, out.constData (), out.size (), nullptr);
+}
+
+void gtk_accel_map_foreach (gpointer data, GtkAccelMapForeach func)
+{
+  for (auto it = accel_map ().constBegin (); it != accel_map ().constEnd (); ++it)
+    func (data, it.key ().constData (), it->key, (GdkModifierType) it->mods, it->changed);
+}
+
+void gtk_accel_map_lock_path (const gchar *path) { accel_map ()[QByteArray (path)].locked = true; }
+void gtk_accel_map_unlock_path (const gchar *path) { accel_map ()[QByteArray (path)].locked = false; }
+
+} /* extern "C" */
+
+
+/* ======================================================================
+ * Odds and ends of the GTK 2 API
+ * ====================================================================== */
+extern "C" {
+
+gint gdk_screen_get_width_mm (GdkScreen *)
+{
+  gtkqt_ensure_app ();
+  QScreen *s = QGuiApplication::primaryScreen ();
+  return s ? qRound (s->physicalSize ().width ()) : 0;
+}
+gint gdk_screen_get_height_mm (GdkScreen *)
+{
+  gtkqt_ensure_app ();
+  QScreen *s = QGuiApplication::primaryScreen ();
+  return s ? qRound (s->physicalSize ().height ()) : 0;
+}
+
+/* GDK calls back into GTK from the one GUI thread only; nothing to lock */
+void gdk_threads_set_lock_functions (GCallback, GCallback) {}
+void gdk_window_set_type_hint (GdkWindow *, GdkWindowTypeHint) {}
+void gtk_combo_set_case_sensitive (GtkCombo *, gboolean) {}
+void gtk_container_set_reallocate_redraws (GtkContainer *, gboolean) {}
+void gtk_drag_set_icon_default (GdkDragContext *) {}
+
+GtkWidget *gtk_get_event_widget (GdkEvent *event)
+{
+  GdkWindow *w = event ? event->any.window : nullptr;
+  return w && GDK_IS_DRAWABLE (w) ? w->widget : nullptr;
+}
+
+void gtk_image_set_from_pixmap (GtkImage *image, GdkPixmap *pixmap, GdkBitmap *mask)
+{
+  if (auto *l = gtkqt_q<QLabel> (GTK_WIDGET (image))) l->setPixmap (pixmap ? gtkqt_qpixmap (pixmap, mask) : QPixmap ());
+}
+GtkWidget *gtk_image_new_from_pixmap (GdkPixmap *pixmap, GdkBitmap *mask)
+{
+  GtkWidget *w = gtk_image_new ();
+  gtk_image_set_from_pixmap (GTK_IMAGE (w), pixmap, mask);
+  return w;
+}
+
+void gtk_menu_insert (GtkMenu *menu, GtkWidget *child, gint position) { gtk_menu_shell_insert (GTK_MENU_SHELL (menu), child, position); }
+
+GtkWidget *gtk_radio_menu_item_new_with_mnemonic_from_widget (GtkRadioMenuItem *group, const gchar *label)
+{
+  return gtk_radio_menu_item_new_with_mnemonic (group ? gtk_radio_menu_item_get_group (group) : nullptr, label);
+}
+GtkWidget *gtk_radio_menu_item_new_with_label_from_widget (GtkRadioMenuItem *group, const gchar *label)
+{
+  return gtk_radio_menu_item_new_with_label (group ? gtk_radio_menu_item_get_group (group) : nullptr, label);
+}
+GtkWidget *gtk_radio_menu_item_new_from_widget (GtkRadioMenuItem *group) { return gtk_radio_menu_item_new_with_label_from_widget (group, ""); }
+
+/* a stock id the icon theme can show has an icon set */
+GtkIconSet *gtk_style_lookup_icon_set (GtkStyle *, const gchar *stock_id)
+{
+  /* only registered stock ids: GTK's own and those programs add */
+  if (!stock_id || (!g_str_has_prefix (stock_id, "gtk-") && !gtkqt_user_icons.contains (QString::fromUtf8 (stock_id)))) return nullptr;
+  GtkIconSet *set = gtk_icon_factory_lookup_default (stock_id);
+  return set && !set->icon.isNull () ? set : nullptr;
+}
+
+void gtk_tool_item_set_homogeneous (GtkToolItem *, gboolean) {}
+void gtk_tool_item_set_tooltip (GtkToolItem *item, GtkTooltips *, const gchar *tip_text, const gchar *)
+{
+  gtk_tool_item_set_tooltip_text (item, tip_text);
+}
+void gtk_toolbar_set_orientation (GtkToolbar *toolbar, GtkOrientation orientation)
+{
+  if (auto *tb = gtkqt_q<QToolBar> (GTK_WIDGET (toolbar))) tb->setOrientation (orientation == GTK_ORIENTATION_VERTICAL ? Qt::Vertical : Qt::Horizontal);
+}
+
+/* the key goes to the focus widget, then its parents, as GTK delivers it */
+gboolean gtk_window_propagate_key_event (GtkWindow *window, GdkEventKey *event)
+{
+  GtkWidget *w = gtk_window_get_focus (window);
+  const char *sig = event->type == GDK_KEY_RELEASE ? "key-release-event" : "key-press-event";
+  for (; w && w != GTK_WIDGET (window); w = w->parent) {
+    gboolean handled = FALSE;
+    g_signal_emit_by_name (w, sig, event, &handled);
+    if (!handled && event->type == GDK_KEY_PRESS) handled = gtkqt_bindings_activate (w, event->keyval, event->state);
+    if (handled) return TRUE;
+  }
+  return FALSE;
+}
+
+void gtk_window_set_gravity (GtkWindow *, GdkGravity) {}
+void gtk_window_set_opacity (GtkWindow *window, gdouble opacity) { if (QWidget *w = gtkqt_qw (GTK_WIDGET (window))) w->setWindowOpacity (opacity); }
+gdouble gtk_window_get_opacity (GtkWindow *window) { QWidget *w = gtkqt_qw (GTK_WIDGET (window)); return w ? w->windowOpacity () : 1.0; }
+void gtk_window_set_skip_taskbar_hint (GtkWindow *, gboolean) {}
+void gtk_window_set_skip_pager_hint (GtkWindow *, gboolean) {}
+
 } /* extern "C" */

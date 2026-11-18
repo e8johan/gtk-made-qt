@@ -52,3 +52,10 @@ gtkqt_add_program(test-galculator ${CMAKE_CURRENT_SOURCE_DIR}/test-galculator.c 
 target_link_options(test-galculator PRIVATE -rdynamic)   # gtk_builder_connect_signals finds the handlers
 add_test(NAME galculator COMMAND test-galculator)
 set_tests_properties(galculator PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
+
+# A GTK 2 mail client (Sylpheed): tree view columns and row events, select
+# functions, row references, text tags, images and child anchors, key
+# bindings, the accel map, text combo models, menu item labels ...
+gtkqt_add_program(test-sylpheed ${CMAKE_CURRENT_SOURCE_DIR}/test-sylpheed.c 2)
+add_test(NAME sylpheed COMMAND test-sylpheed)
+set_tests_properties(sylpheed PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)

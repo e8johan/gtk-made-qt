@@ -222,6 +222,7 @@ void       gtk_widget_restore_default_style (GtkWidget *widget);
 void       gtk_window_set_policy (GtkWindow *window, gint allow_shrink, gint allow_grow, gint auto_shrink);
 typedef enum { GDK_GRAVITY_NORTH_WEST = 1, GDK_GRAVITY_NORTH, GDK_GRAVITY_NORTH_EAST, GDK_GRAVITY_WEST, GDK_GRAVITY_CENTER,
                GDK_GRAVITY_EAST, GDK_GRAVITY_SOUTH_WEST, GDK_GRAVITY_SOUTH, GDK_GRAVITY_SOUTH_EAST, GDK_GRAVITY_STATIC } GdkGravity;
+void gtk_window_set_gravity (GtkWindow *window, GdkGravity gravity);
 typedef enum { GDK_HINT_POS = 1 << 0, GDK_HINT_MIN_SIZE = 1 << 1, GDK_HINT_MAX_SIZE = 1 << 2, GDK_HINT_BASE_SIZE = 1 << 3,
                GDK_HINT_ASPECT = 1 << 4, GDK_HINT_RESIZE_INC = 1 << 5, GDK_HINT_WIN_GRAVITY = 1 << 6,
                GDK_HINT_USER_POS = 1 << 7, GDK_HINT_USER_SIZE = 1 << 8 } GdkWindowHints;

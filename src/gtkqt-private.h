@@ -151,6 +151,9 @@ void gtkqt_defer_delete (QObject *obj);
 /* ---------- visibility / placement ---------- */
 void gtkqt_sync_visible (GtkWidget *widget);      /* push priv->visible to the Qt widget */
 void gtkqt_apply_size_request (GtkWidget *widget);
+class QScrollBar;
+GtkAdjustment *gtkqt_scrollbar_adjustment (GObject *owner, const char *key, QScrollBar *sb);   /* in step with the scroll bar */
+void gtkqt_sync_public_children (GtkWidget *w);   /* GTK 2 public children fields (GtkBox, GtkMenuShell) */
 void gtkqt_container_adopt (GtkContainer *container, GtkWidget *child);  /* bookkeeping + place */
 void gtkqt_container_release (GtkContainer *container, GtkWidget *child);
 void gtkqt_set_place (GtkContainerClass *klass, GtkQtPlaceFunc place, GtkQtPlaceFunc unplace);
@@ -232,6 +235,8 @@ QObject   *gtkqt_file_dialog_create (GtkWidget *w);
 
 /* ---------- misc ---------- */
 GdkWindow *gtkqt_gdk_window (GtkWidget *widget);
+void       gtkqt_accel_path_attach (GtkWidget *item, const gchar *path, GtkAccelGroup *group);   /* GtkAccelMap */
+gboolean   gtkqt_bindings_activate (GtkWidget *widget, guint keyval, guint state);   /* GtkBindingSet */
 QImage     gtkqt_pixbuf_image (GdkPixbuf *pixbuf);
 GdkPixbuf *gtkqt_pixbuf_from_image (const QImage &image);
 GtkWidget *gtkqt_text_buffer_any_view (GtkTextBuffer *buffer);

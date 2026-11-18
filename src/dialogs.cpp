@@ -546,6 +546,8 @@ static void gtk_file_chooser_dialog_init (GtkFileChooserDialog *) {}
 static void gtk_file_chooser_dialog_class_init (GtkFileChooserDialogClass *klass)
 {
   gtkqt_set_create (GTK_WIDGET_CLASS (klass), gtkqt_file_dialog_create);
+  /* QFileDialog asks before overwriting itself; programs can still connect */
+  g_signal_new ("confirm-overwrite", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr, G_TYPE_INT, 0);
   gtkqt_prop (klass, g_param_spec_enum ("action", nullptr, nullptr, gtk_file_chooser_action_get_type (), 0, RW),
               [] (GObject *o, const GValue *v) { gtk_file_chooser_set_action ((GtkFileChooser *) o, (GtkFileChooserAction) g_value_get_enum (v)); }, nullptr);
   gtkqt_prop (klass, g_param_spec_boolean ("select-multiple", nullptr, nullptr, FALSE, RW),

@@ -511,7 +511,7 @@ static void radio_leave (gpointer data, GObject *where)
 
 static void radio_join (GtkWidget *w, RadioGroup *g)
 {
-  if (radio_group_of (w) == g) return;
+  if (g && radio_group_of (w) == g) return;
   if (RadioGroup *old = radio_group_of (w)) {
     if (auto *b = gtkqt_q<QAbstractButton> (w)) if (old->qgroup) old->qgroup->removeButton (b);
     g_object_weak_unref (G_OBJECT (w), radio_leave, old);
@@ -1498,8 +1498,17 @@ GtkWidget *gtk_combo_box_text_new_with_entry (void)
 
 static QComboBox *qcombo (gpointer w) { return gtkqt_q<QComboBox> ((GtkWidget *) w); }
 
+/* the store, once the program asked for the text combo's model */
+static GtkListStore *text_store (gpointer combo) { return (GtkListStore *) g_object_get_data (G_OBJECT (combo), "gtkqt-text-store"); }
+
 void gtk_combo_box_text_insert (GtkComboBoxText *combo, gint position, const gchar *id, const gchar *text)
 {
+  if (GtkListStore *st = text_store (combo)) {
+    GtkTreeIter it;
+    gtk_list_store_insert (st, &it, position);
+    gtk_list_store_set (st, &it, 0, text, 1, id, -1);
+    return;
+  }
   if (QComboBox *c = qcombo (combo)) {
     if (position < 0 || position > c->count ()) position = c->count ();
     QSignalBlocker b (c);
@@ -1514,8 +1523,20 @@ void gtk_combo_box_text_prepend (GtkComboBoxText *combo, const gchar *id, const 
 void gtk_combo_box_text_append_text (GtkComboBoxText *combo, const gchar *text) { gtk_combo_box_text_insert (combo, -1, nullptr, text); }
 void gtk_combo_box_text_prepend_text (GtkComboBoxText *combo, const gchar *text) { gtk_combo_box_text_insert (combo, 0, nullptr, text); }
 void gtk_combo_box_text_insert_text (GtkComboBoxText *combo, gint position, const gchar *text) { gtk_combo_box_text_insert (combo, position, nullptr, text); }
-void gtk_combo_box_text_remove (GtkComboBoxText *combo, gint position) { if (QComboBox *c = qcombo (combo)) c->removeItem (position); }
-void gtk_combo_box_text_remove_all (GtkComboBoxText *combo) { if (QComboBox *c = qcombo (combo)) c->clear (); }
+void gtk_combo_box_text_remove (GtkComboBoxText *combo, gint position)
+{
+  if (GtkListStore *st = text_store (combo)) {
+    GtkTreeIter it;
+    if (gtk_tree_model_iter_nth_child (GTK_TREE_MODEL (st), &it, nullptr, position)) gtk_list_store_remove (st, &it);
+    return;
+  }
+  if (QComboBox *c = qcombo (combo)) c->removeItem (position);
+}
+void gtk_combo_box_text_remove_all (GtkComboBoxText *combo)
+{
+  if (GtkListStore *st = text_store (combo)) { gtk_list_store_clear (st); return; }
+  if (QComboBox *c = qcombo (combo)) c->clear ();
+}
 
 gchar *gtk_combo_box_text_get_active_text (GtkComboBoxText *combo)
 {
@@ -1538,6 +1559,15 @@ const gchar *gtk_combo_box_get_active_id (GtkComboBox *combo)
 {
   QComboBox *c = qcombo (combo);
   if (!c || c->currentIndex () < 0) return nullptr;
+  if (GtkListStore *st = text_store (combo)) {
+    GtkTreeIter it;
+    gchar *id = nullptr;
+    if (!gtk_tree_model_iter_nth_child (GTK_TREE_MODEL (st), &it, nullptr, c->currentIndex ())) return nullptr;
+    gtk_tree_model_get (GTK_TREE_MODEL (st), &it, 1, &id, -1);
+    const gchar *r = id ? gtkqt_ret (GTK_WIDGET (combo), gtkqt_str (id)) : nullptr;
+    g_free (id);
+    return r;
+  }
   QVariant v = c->currentData ();
   return v.isValid () ? gtkqt_ret (GTK_WIDGET (combo), v.toString ()) : nullptr;
 }
@@ -1546,7 +1576,21 @@ gboolean gtk_combo_box_set_active_id (GtkComboBox *combo, const gchar *active_id
 {
   QComboBox *c = qcombo (combo);
   if (!c) return FALSE;
-  int i = active_id ? c->findData (gtkqt_str (active_id)) : -1;
+  int i = -1;
+  if (GtkListStore *st = text_store (combo)) {
+    GtkTreeIter it;
+    int n = 0;
+    for (gboolean ok = gtk_tree_model_get_iter_first (GTK_TREE_MODEL (st), &it); ok && active_id && i < 0;
+         ok = gtk_tree_model_iter_next (GTK_TREE_MODEL (st), &it), n++) {
+      gchar *id = nullptr;
+      gtk_tree_model_get (GTK_TREE_MODEL (st), &it, 1, &id, -1);
+      if (id && !strcmp (id, active_id)) i = n;
+      g_free (id);
+    }
+    c->setCurrentIndex (i);
+    return i >= 0 || !active_id;
+  }
+  i = active_id ? c->findData (gtkqt_str (active_id)) : -1;
   c->setCurrentIndex (i);
   return i >= 0 || !active_id;
 }

@@ -78,6 +78,20 @@ use font and color buttons.
 
 ![Galculator scientific and paper modes, preferences](docs/screenshots/galculator-modes.png)
 
+[Sylpheed 3.7](https://sylpheed.sraoss.jp/), the GTK 2 mail client, unmodified
+(linked with `gtk-made-qt-env --shared`: its plugin library calls GTK too).
+The folder tree and message list are GtkTreeViews whose columns Sylpheed
+reaches into (`column->button`, `sort_column_id`); the message view is a text
+view with tags, inline images and widgets anchored in the text (the
+separator line, the attachment buttons); its menus come from item factories
+whose accelerators it saves and loads through the accel map.
+
+| Sylpheed, real GTK 2 | Sylpheed on GTK made Qt |
+| --- | --- |
+| ![Sylpheed on GTK 2](docs/screenshots/sylpheed-gtk2.png) | ![Sylpheed on Qt](docs/screenshots/sylpheed-qt.png) |
+
+![Sylpheed compose window](docs/screenshots/sylpheed-compose.png)
+
 ## Quick start
 
 ```bash

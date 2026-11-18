@@ -117,6 +117,28 @@ Things that cost time once; check here before debugging something similar.
 - In C, `XWindowAttributes` and `Visual` have `class`; `c_class` is the C++
   spelling.
 
+## Sylpheed (GTK 2 mail client)
+
+- A list's rows and a text view's text are in the scroll area's viewport
+  (GTK's bin_window / text window): mouse events must be taken there, in
+  viewport coordinates, or programs never see a click on a row or a link.
+- Programs keep `l->next` while destroying `l->data` from public child
+  lists (`GTK_MENU_SHELL (menu)->children`): update those lists in place,
+  never free and rebuild them.
+- GTK 2 widgets have children programs look for: a menu item's GtkLabel,
+  a tool button's inner GtkButton (`GTK_BIN (item)->child`).
+- Text tags made later win where tags overlap, in whatever order they were
+  applied; Qt keeps the last format merged.
+- `gtk_style_lookup_icon_set` answers only for registered stock ids: answer
+  for any themed name and programs drop their own icons for the theme's.
+- `QWidget::adjustSize` stops at 2/3 of the screen; GTK windows open at
+  their full request.
+- A program with its own shared library or plugins that call GTK must use
+  the shared build: a static copy in each module gives two type systems.
+- Qt's offscreen platform searches only `:/icons` for icon themes: add the
+  XDG data directories, and pick an installed theme when the platform has
+  none (SVG themes need Qt's SVG plugin).
+
 ## Implementation pitfalls
 
 - Static functions in an `extern "C"` block have C linkage: their forward

@@ -413,3 +413,80 @@ GtkPrintOperationResult gtk_print_operation_run (GtkPrintOperation *op, GtkPrint
 }
 
 } /* extern "C" */
+
+/* ---------- saving settings and page setups ---------- */
+extern "C" {
+
+GtkPrintSettings *gtk_print_settings_new_from_file (const gchar *file_name, GError **error)
+{
+  GKeyFile *k = g_key_file_new ();
+  if (!g_key_file_load_from_file (k, file_name, G_KEY_FILE_NONE, error)) { g_key_file_free (k); return nullptr; }
+  GtkPrintSettings *s = gtk_print_settings_new ();
+  gchar **keys = g_key_file_get_keys (k, "Print Settings", nullptr, nullptr);
+  for (gchar **key = keys; key && *key; key++) {
+    gchar *v = g_key_file_get_string (k, "Print Settings", *key, nullptr);
+    gtk_print_settings_set (s, *key, v);
+    g_free (v);
+  }
+  g_strfreev (keys);
+  g_key_file_free (k);
+  return s;
+}
+
+gboolean gtk_print_settings_to_file (GtkPrintSettings *s, const gchar *file_name, GError **error)
+{
+  GKeyFile *k = g_key_file_new ();
+  g_key_file_load_from_file (k, file_name, G_KEY_FILE_KEEP_COMMENTS, nullptr);
+  g_key_file_remove_group (k, "Print Settings", nullptr);
+  for (auto it = s->values->constBegin (); it != s->values->constEnd (); ++it)
+    g_key_file_set_string (k, "Print Settings", it.key ().constData (), it.value ().constData ());
+  gboolean ok = g_key_file_save_to_file (k, file_name, error);
+  g_key_file_free (k);
+  return ok;
+}
+
+GtkPageSetup *gtk_page_setup_new_from_file (const gchar *file_name, GError **error)
+{
+  GKeyFile *k = g_key_file_new ();
+  if (!g_key_file_load_from_file (k, file_name, G_KEY_FILE_NONE, error)) { g_key_file_free (k); return nullptr; }
+  GtkPageSetup *s = gtk_page_setup_new ();
+  auto num = [k] (const char *group, const char *key, double &out) {
+    GError *e = nullptr;
+    double v = g_key_file_get_double (k, group, key, &e);
+    if (!e) out = v; else g_error_free (e);
+  };
+  num ("Page Setup", "MarginTop", s->top);
+  num ("Page Setup", "MarginBottom", s->bottom);
+  num ("Page Setup", "MarginLeft", s->left);
+  num ("Page Setup", "MarginRight", s->right);
+  num ("Paper Size", "Width", s->paper_w);
+  num ("Paper Size", "Height", s->paper_h);
+  gchar *o = g_key_file_get_string (k, "Page Setup", "Orientation", nullptr);
+  if (o) {
+    s->orientation = !strcmp (o, "landscape") ? GTK_PAGE_ORIENTATION_LANDSCAPE : !strcmp (o, "reverse_portrait") ? GTK_PAGE_ORIENTATION_REVERSE_PORTRAIT
+                     : !strcmp (o, "reverse_landscape") ? GTK_PAGE_ORIENTATION_REVERSE_LANDSCAPE : GTK_PAGE_ORIENTATION_PORTRAIT;
+    g_free (o);
+  }
+  g_key_file_free (k);
+  return s;
+}
+
+gboolean gtk_page_setup_to_file (GtkPageSetup *s, const gchar *file_name, GError **error)
+{
+  GKeyFile *k = g_key_file_new ();
+  g_key_file_load_from_file (k, file_name, G_KEY_FILE_KEEP_COMMENTS, nullptr);
+  g_key_file_set_double (k, "Paper Size", "Width", s->paper_w);
+  g_key_file_set_double (k, "Paper Size", "Height", s->paper_h);
+  g_key_file_set_double (k, "Page Setup", "MarginTop", s->top);
+  g_key_file_set_double (k, "Page Setup", "MarginBottom", s->bottom);
+  g_key_file_set_double (k, "Page Setup", "MarginLeft", s->left);
+  g_key_file_set_double (k, "Page Setup", "MarginRight", s->right);
+  static const char *names[] = { "portrait", "landscape", "reverse_portrait", "reverse_landscape" };
+  g_key_file_set_string (k, "Page Setup", "Orientation", names[s->orientation & 3]);
+  gboolean ok = g_key_file_save_to_file (k, file_name, error);
+  g_key_file_free (k);
+  return ok;
+}
+
+} /* extern "C" */
+

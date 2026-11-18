@@ -76,15 +76,15 @@ These applications have zero external GNOME dependencies and compile quickly wit
 
 These widely used C applications exercise complex layouts, multi-view text buffers, and nested event loops (`gtk_dialog_run`).
 
-#### 4. Sylpheed (GTK 2)
+#### 4. Sylpheed (GTK 2) - runs (3.7.0, unmodified; see README)
 * **Why it fits:** A fast, self-contained C email client that remains on GTK 2. It uses `GIOChannel` for non-blocking network sockets inside the GLib main loop alongside rich tree and text widgets.
 * **Key widgets exercised:** `GtkTreeStore`, `GtkTreeView`, `GtkTextView`, `GtkTextBuffer`, `GtkPaned`, `GtkNotebook`, `GtkStatusbar`, `GtkComboBoxText`.
 * **Watch-outs:** Uses some legacy GTK 1/2 widgets (`GtkCList` in older dialogs, `GdkPixmap` icon loaders) and `pango_layout_*` calls in message header rendering.
-* **Build instructions:**
+* **Build instructions:** its plugin library calls GTK too, so link the
+  shared build:
   ```bash
-  export PKG_CONFIG_PATH="/path/to/gtk-made-qt/build/pkgconfig"
-  ./configure --disable-ssl --disable-gpgme   # Minimal dependency build for UI testing
-  make -j$(nproc)
+  gtk-made-qt-env --shared ./configure --prefix=/usr --disable-gtkspell
+  gtk-made-qt-env --shared make -j$(nproc)
   ```
 
 #### 5. Geany (GTK 2 / GTK 3)

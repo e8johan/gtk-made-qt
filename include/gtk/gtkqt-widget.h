@@ -323,6 +323,7 @@ void       gtk_css_provider_load_from_resource (GtkCssProvider *provider, const 
 #define GTK_WIDGET_HAS_FOCUS(wid)         (gtk_widget_has_focus (GTK_WIDGET (wid)))
 #define GTK_WIDGET_MAPPED(wid)            (gtk_widget_get_mapped (GTK_WIDGET (wid)))
 #define GTK_WIDGET_REALIZED(wid)          (gtk_widget_get_realized (GTK_WIDGET (wid)))
+#define GTK_WIDGET_DRAWABLE(wid)          (gtk_widget_get_visible (GTK_WIDGET (wid)) && gtk_widget_get_mapped (GTK_WIDGET (wid)))
 #define GTK_WIDGET_TOPLEVEL(wid)          (gtk_widget_is_toplevel (GTK_WIDGET (wid)))
 #define GTK_WIDGET_CAN_FOCUS(wid)         (gtk_widget_get_can_focus (GTK_WIDGET (wid)))
 void gtkqt_widget_set_flags (GtkWidget *widget, guint32 flags, gboolean set);

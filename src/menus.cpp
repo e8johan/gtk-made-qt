@@ -275,6 +275,13 @@ void gtk_menu_shell_insert (GtkMenuShell *menu_shell, GtkWidget *child, gint pos
   if (child->parent) return;
   child->priv->grid_left = position;
   gtkqt_container_adopt (GTK_CONTAINER (menu_shell), child);
+  /* the list in menu order, as the items were placed */
+  GtkWidgetPrivate *p = GTK_WIDGET (menu_shell)->priv;
+  if (position >= 0 && position < (gint) g_list_length (p->children) - 1) {
+    p->children = g_list_remove (p->children, child);
+    p->children = g_list_insert (p->children, child, position);
+    gtkqt_sync_public_children (GTK_WIDGET (menu_shell));
+  }
 }
 
 void gtk_menu_shell_append (GtkMenuShell *menu_shell, GtkWidget *child) { gtk_menu_shell_insert (menu_shell, child, -1); }
@@ -380,8 +387,16 @@ static void menu_item_place (GtkContainer *c, GtkWidget *child)
       if (GtkWidget *f = find_label ((GtkWidget *) l->data)) return f;
     return nullptr;
   };
-  if (GtkWidget *label = find_label (child))
-    a->setText (gtkqt_str (gtk_label_get_text (GTK_LABEL (label))).replace ('&', QStringLiteral ("&&")));
+  GtkWidget *label = find_label (child);
+  if (!label) return;
+  a->setText (gtkqt_str (gtk_label_get_text (GTK_LABEL (label))).replace ('&', QStringLiteral ("&&")));
+  /* programs change the item's text through its label */
+  if (!g_object_get_data (G_OBJECT (label), "gtkqt-menu-label")) {
+    g_object_set_data (G_OBJECT (label), "gtkqt-menu-label", c);
+    g_signal_connect_object (label, "notify::label", G_CALLBACK (+[] (GtkWidget *l, GParamSpec *, GtkWidget *item) {
+      if (auto *qa = gtkqt_q<QAction> (item)) qa->setText (gtkqt_str (gtk_label_get_text (GTK_LABEL (l))).replace ('&', QStringLiteral ("&&")));
+    }), c, (GConnectFlags) 0);
+  }
 }
 
 static void menu_item_unplace (GtkContainer *, GtkWidget *) {}
@@ -549,9 +564,23 @@ static void menu_item_update_text (GtkMenuItem *item)
   else a->setText (gtkqt_str (label).replace ('&', QStringLiteral ("&&")));
 }
 
+/* the text is a GtkLabel inside the item, as in GTK 2 (programs reach it
+ * as GTK_BIN (item)->child); separators have none */
 void gtk_menu_item_set_label (GtkMenuItem *item, const gchar *label)
 {
   g_object_set_data_full (G_OBJECT (item), "gtkqt-label", g_strdup (label), g_free);
+  GtkWidget *child = GTK_BIN (item)->child;
+  bool underline = g_object_get_data (G_OBJECT (item), "gtkqt-use-underline") != nullptr;
+  if (!child && !GTK_IS_SEPARATOR_MENU_ITEM (item)) {
+    child = gtk_label_new (nullptr);
+    gtk_misc_set_alignment (GTK_MISC (child), 0, 0.5);
+    gtk_widget_show (child);
+    gtk_container_add (GTK_CONTAINER (item), child);
+  }
+  if (child && GTK_IS_LABEL (child)) {
+    if (underline) gtk_label_set_text_with_mnemonic (GTK_LABEL (child), label);
+    else gtk_label_set_text (GTK_LABEL (child), label);
+  }
   menu_item_update_text (item);
 }
 
@@ -560,6 +589,8 @@ const gchar *gtk_menu_item_get_label (GtkMenuItem *item) { return (const gchar *
 void gtk_menu_item_set_use_underline (GtkMenuItem *item, gboolean setting)
 {
   g_object_set_data (G_OBJECT (item), "gtkqt-use-underline", GINT_TO_POINTER (setting));
+  if (GtkWidget *child = GTK_BIN (item)->child)
+    if (GTK_IS_LABEL (child)) gtk_label_set_use_underline (GTK_LABEL (child), setting);
   menu_item_update_text (item);
 }
 
@@ -585,7 +616,7 @@ GtkWidget *gtk_menu_item_get_submenu (GtkMenuItem *item) { return (GtkWidget *) 
 void gtk_menu_item_remove_submenu (GtkMenuItem *item) { gtk_menu_item_set_submenu (item, nullptr); }
 void gtk_menu_item_set_right_justified (GtkMenuItem *, gboolean) {}
 void gtk_menu_item_activate (GtkMenuItem *item) { if (auto *a = gtkqt_q<QAction> (GTK_WIDGET (item))) a->trigger (); }
-void gtk_menu_item_set_accel_path (GtkMenuItem *, const gchar *) {}
+void gtk_menu_item_set_accel_path (GtkMenuItem *item, const gchar *path) { gtkqt_accel_path_attach (GTK_WIDGET (item), path, nullptr); }
 
 GtkWidget *gtk_check_menu_item_new (void) { return (GtkWidget *) g_object_new (GTK_TYPE_CHECK_MENU_ITEM, nullptr); }
 
@@ -1012,12 +1043,20 @@ static QObject *toolbar_create (GtkWidget *)
   return t;
 }
 
+/* GTK_TOOLBAR_BOTH_HORIZ labels only the items marked important */
+static Qt::ToolButtonStyle tool_button_style (GtkWidget *item, Qt::ToolButtonStyle style)
+{
+  if (style != Qt::ToolButtonTextBesideIcon || !item || g_object_get_data (G_OBJECT (item), "gtkqt-important")) return style;
+  auto *b = qobject_cast<QToolButton *> (gtkqt_obj (item));
+  return b && !b->icon ().isNull () ? Qt::ToolButtonIconOnly : style;   /* without an icon the label stays */
+}
+
 static void toolbar_place (GtkContainer *c, GtkWidget *child)
 {
   auto *t = gtkqt_q<QToolBar> (GTK_WIDGET (c));
   QWidget *cw = gtkqt_qw (child);
   if (!t || !cw) return;
-  if (auto *tb = qobject_cast<QToolButton *> (cw)) tb->setToolButtonStyle (t->toolButtonStyle ());
+  if (auto *tb = qobject_cast<QToolButton *> (cw)) tb->setToolButtonStyle (tool_button_style (child, t->toolButtonStyle ()));
   QList<QAction *> acts = t->actions ();
   int pos = child->priv->grid_left;
   QAction *a = pos >= 0 && pos < acts.size () ? t->insertWidget (acts.at (pos), cw) : t->addWidget (cw);
@@ -1088,9 +1127,38 @@ static void gtk_toolbar_class_init (GtkToolbarClass *klass)
 }
 static void gtk_tool_item_init (GtkToolItem *) {}
 static void gtk_tool_item_class_init (GtkToolItemClass *klass) { gtkqt_set_create (GTK_WIDGET_CLASS (klass), tool_item_create); }
-static void gtk_tool_button_init (GtkToolButton *) {}
+/* GTK 2's tool button holds a GtkButton (its bin child) that programs
+ * connect to; the QToolButton's mouse events reach it first */
+static gboolean tool_button_forward (GtkWidget *item, GdkEvent *event)
+{
+  GtkWidget *child = GTK_BIN (item)->child;
+  gboolean handled = FALSE;
+  if (child && !child->priv->destroyed)
+    g_signal_emit_by_name (child, event->type == GDK_BUTTON_RELEASE ? "button-release-event" : "button-press-event", event, &handled);
+  return handled;
+}
+static void gtk_tool_button_init (GtkToolButton *t)
+{
+  GtkWidget *b = gtk_button_new ();
+  g_object_ref_sink (b);
+  b->parent = GTK_WIDGET (t);
+  GTK_BIN (t)->child = b;
+  g_signal_connect (t, "button-press-event", G_CALLBACK (tool_button_forward), nullptr);
+  g_signal_connect (t, "button-release-event", G_CALLBACK (tool_button_forward), nullptr);
+}
+static void tool_button_dispose (GObject *o)
+{
+  if (GtkWidget *b = GTK_BIN (o)->child) {
+    GTK_BIN (o)->child = nullptr;
+    b->parent = nullptr;
+    gtk_widget_destroy (b);
+    g_object_unref (b);
+  }
+  G_OBJECT_CLASS (gtk_tool_button_parent_class)->dispose (o);
+}
 static void gtk_tool_button_class_init (GtkToolButtonClass *klass)
 {
+  G_OBJECT_CLASS (klass)->dispose = tool_button_dispose;
   gtkqt_set_create (GTK_WIDGET_CLASS (klass), tool_button_create);
   g_signal_new ("clicked", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_FIRST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
   gtkqt_prop (klass, g_param_spec_string ("label", nullptr, nullptr, nullptr, RW),
@@ -1131,7 +1199,8 @@ void gtk_toolbar_set_style (GtkToolbar *toolbar, GtkToolbarStyle style)
   if (!t) return;
   static const Qt::ToolButtonStyle map[] = { Qt::ToolButtonIconOnly, Qt::ToolButtonTextOnly, Qt::ToolButtonTextUnderIcon, Qt::ToolButtonTextBesideIcon };
   t->setToolButtonStyle (map[style & 3]);
-  for (QToolButton *b : t->findChildren<QToolButton *> ()) b->setToolButtonStyle (map[style & 3]);
+  for (QToolButton *b : t->findChildren<QToolButton *> ())
+    b->setToolButtonStyle (tool_button_style (gtkqt_from_qobject (b), map[style & 3]));
 }
 
 void gtk_toolbar_set_icon_size (GtkToolbar *toolbar, GtkIconSize icon_size)
@@ -1206,7 +1275,14 @@ void gtk_tool_item_set_expand (GtkToolItem *tool_item, gboolean expand)
     qw->setSizePolicy (expand ? QSizePolicy::Expanding : QSizePolicy::Preferred, qw->sizePolicy ().verticalPolicy ());
 }
 
-void gtk_tool_item_set_is_important (GtkToolItem *, gboolean) {}
+void gtk_tool_item_set_is_important (GtkToolItem *item, gboolean important)
+{
+  g_object_set_data (G_OBJECT (item), "gtkqt-important", GINT_TO_POINTER (important));
+  auto *b = gtkqt_q<QToolButton> (GTK_WIDGET (item));
+  auto *t = b ? qobject_cast<QToolBar *> (b->parentWidget ()) : nullptr;
+  if (t) b->setToolButtonStyle (tool_button_style (GTK_WIDGET (item), t->toolButtonStyle ()));
+}
+gboolean gtk_tool_item_get_is_important (GtkToolItem *item) { return g_object_get_data (G_OBJECT (item), "gtkqt-important") != nullptr; }
 
 } /* extern "C" */
 

@@ -76,11 +76,16 @@ PangoLayout  *gtk_print_context_create_pango_layout (GtkPrintContext *context);
 void          gtk_print_context_set_cairo_context (GtkPrintContext *context, cairo_t *cr, double dpi_x, double dpi_y);
 
 GtkPrintSettings *gtk_print_settings_new (void);
+/* GTK's key file format: [Print Settings], [Page Setup] */
+GtkPrintSettings *gtk_print_settings_new_from_file (const gchar *file_name, GError **error);
+gboolean          gtk_print_settings_to_file (GtkPrintSettings *settings, const gchar *file_name, GError **error);
 GtkPrintSettings *gtk_print_settings_copy (GtkPrintSettings *other);
 const gchar *gtk_print_settings_get (GtkPrintSettings *settings, const gchar *key);
 void         gtk_print_settings_set (GtkPrintSettings *settings, const gchar *key, const gchar *value);
 
 GtkPageSetup *gtk_page_setup_new (void);
+GtkPageSetup *gtk_page_setup_new_from_file (const gchar *file_name, GError **error);
+gboolean      gtk_page_setup_to_file (GtkPageSetup *setup, const gchar *file_name, GError **error);
 GtkPageSetup *gtk_page_setup_copy (GtkPageSetup *other);
 void    gtk_page_setup_set_orientation (GtkPageSetup *setup, GtkPageOrientation orientation);
 GtkPageOrientation gtk_page_setup_get_orientation (GtkPageSetup *setup);
