@@ -2924,8 +2924,14 @@ GtkWidget *gtk_radio_menu_item_new_with_label_from_widget (GtkRadioMenuItem *gro
 }
 GtkWidget *gtk_radio_menu_item_new_from_widget (GtkRadioMenuItem *group) { return gtk_radio_menu_item_new_with_label_from_widget (group, ""); }
 
-/* stock icons come from the Qt theme; programs then use their own images */
-GtkIconSet *gtk_style_lookup_icon_set (GtkStyle *, const gchar *) { return nullptr; }
+/* a stock id the icon theme can show has an icon set */
+GtkIconSet *gtk_style_lookup_icon_set (GtkStyle *, const gchar *stock_id)
+{
+  /* only registered stock ids: GTK's own and those programs add */
+  if (!stock_id || (!g_str_has_prefix (stock_id, "gtk-") && !gtkqt_user_icons.contains (QString::fromUtf8 (stock_id)))) return nullptr;
+  GtkIconSet *set = gtk_icon_factory_lookup_default (stock_id);
+  return set && !set->icon.isNull () ? set : nullptr;
+}
 
 void gtk_tool_item_set_homogeneous (GtkToolItem *, gboolean) {}
 void gtk_tool_item_set_tooltip (GtkToolItem *item, GtkTooltips *, const gchar *tip_text, const gchar *)

@@ -1043,12 +1043,20 @@ static QObject *toolbar_create (GtkWidget *)
   return t;
 }
 
+/* GTK_TOOLBAR_BOTH_HORIZ labels only the items marked important */
+static Qt::ToolButtonStyle tool_button_style (GtkWidget *item, Qt::ToolButtonStyle style)
+{
+  if (style != Qt::ToolButtonTextBesideIcon || !item || g_object_get_data (G_OBJECT (item), "gtkqt-important")) return style;
+  auto *b = qobject_cast<QToolButton *> (gtkqt_obj (item));
+  return b && !b->icon ().isNull () ? Qt::ToolButtonIconOnly : style;   /* without an icon the label stays */
+}
+
 static void toolbar_place (GtkContainer *c, GtkWidget *child)
 {
   auto *t = gtkqt_q<QToolBar> (GTK_WIDGET (c));
   QWidget *cw = gtkqt_qw (child);
   if (!t || !cw) return;
-  if (auto *tb = qobject_cast<QToolButton *> (cw)) tb->setToolButtonStyle (t->toolButtonStyle ());
+  if (auto *tb = qobject_cast<QToolButton *> (cw)) tb->setToolButtonStyle (tool_button_style (child, t->toolButtonStyle ()));
   QList<QAction *> acts = t->actions ();
   int pos = child->priv->grid_left;
   QAction *a = pos >= 0 && pos < acts.size () ? t->insertWidget (acts.at (pos), cw) : t->addWidget (cw);
@@ -1191,7 +1199,8 @@ void gtk_toolbar_set_style (GtkToolbar *toolbar, GtkToolbarStyle style)
   if (!t) return;
   static const Qt::ToolButtonStyle map[] = { Qt::ToolButtonIconOnly, Qt::ToolButtonTextOnly, Qt::ToolButtonTextUnderIcon, Qt::ToolButtonTextBesideIcon };
   t->setToolButtonStyle (map[style & 3]);
-  for (QToolButton *b : t->findChildren<QToolButton *> ()) b->setToolButtonStyle (map[style & 3]);
+  for (QToolButton *b : t->findChildren<QToolButton *> ())
+    b->setToolButtonStyle (tool_button_style (gtkqt_from_qobject (b), map[style & 3]));
 }
 
 void gtk_toolbar_set_icon_size (GtkToolbar *toolbar, GtkIconSize icon_size)
@@ -1266,7 +1275,14 @@ void gtk_tool_item_set_expand (GtkToolItem *tool_item, gboolean expand)
     qw->setSizePolicy (expand ? QSizePolicy::Expanding : QSizePolicy::Preferred, qw->sizePolicy ().verticalPolicy ());
 }
 
-void gtk_tool_item_set_is_important (GtkToolItem *, gboolean) {}
+void gtk_tool_item_set_is_important (GtkToolItem *item, gboolean important)
+{
+  g_object_set_data (G_OBJECT (item), "gtkqt-important", GINT_TO_POINTER (important));
+  auto *b = gtkqt_q<QToolButton> (GTK_WIDGET (item));
+  auto *t = b ? qobject_cast<QToolBar *> (b->parentWidget ()) : nullptr;
+  if (t) b->setToolButtonStyle (tool_button_style (GTK_WIDGET (item), t->toolButtonStyle ()));
+}
+gboolean gtk_tool_item_get_is_important (GtkToolItem *item) { return g_object_get_data (G_OBJECT (item), "gtkqt-important") != nullptr; }
 
 } /* extern "C" */
 

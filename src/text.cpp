@@ -647,13 +647,33 @@ void gtk_text_buffer_remove_tag_by_name (GtkTextBuffer *b, const gchar *name, co
   if (GtkTextTag *t = bd (b)->tags.value (gtkqt_str (name))) gtk_text_buffer_remove_tag (b, t, start, end);
 }
 
+static QList<GtkTextTag *> tags_at (GtkTextBuffer *b, int off);
+static int next_boundary (GtkTextBuffer *b, int off);
+
 static void real_apply_tag (GtkTextBuffer *b, GtkTextTag *tag, const GtkTextIter *start, const GtkTextIter *end)
 {
+  int s = iter_off (start), e = iter_off (end);
+  if (e < s) qSwap (s, e);
   QTextCursor c (bdoc (b));
-  c.setPosition (iter_off (start));
-  c.setPosition (iter_off (end), QTextCursor::KeepAnchor);
+  c.setPosition (s);
+  c.setPosition (e, QTextCursor::KeepAnchor);
   c.mergeCharFormat (tag_fmt (tag));
   if (tag->block) c.mergeBlockFormat (tag_block (tag));
+  /* tags made later have priority, whatever order they are applied in:
+   * merge theirs again where they are */
+  int id = tag_id (tag);
+  for (int p = s; p < e;) {
+    int q = qMin (next_boundary (b, p), e);
+    if (q <= p) break;
+    for (GtkTextTag *t : tags_at (b, p))
+      if (tag_id (t) > id) {
+        QTextCursor r (bdoc (b));
+        r.setPosition (p);
+        r.setPosition (q, QTextCursor::KeepAnchor);
+        r.mergeCharFormat (tag_fmt (t));
+      }
+    p = q;
+  }
 }
 
 void gtk_text_buffer_apply_tag_by_name (GtkTextBuffer *b, const gchar *name, const GtkTextIter *start, const GtkTextIter *end)
@@ -1307,6 +1327,13 @@ static QObject *text_view_create (GtkWidget *w)
   auto *v = GTK_TEXT_VIEW (w);
   v->hadjustment = gtkqt_scrollbar_adjustment (G_OBJECT (w), "gtkqt-hadj", e->horizontalScrollBar ());
   v->vadjustment = gtkqt_scrollbar_adjustment (G_OBJECT (w), "gtkqt-vadj", e->verticalScrollBar ());
+  /* the text window: mouse events there reach the view in its coordinates */
+  e->text_window = gtkqt_drawable_new (GTKQT_DRAWABLE_TEXT_BORDER, w);
+  e->text_window->text_window_type = GTK_TEXT_WINDOW_TEXT;
+  e->text_window->qw = e->viewport ();
+  e->viewport ()->setProperty ("_gtkqt_gdkwindow", QVariant::fromValue ((void *) e->text_window));
+  e->viewport ()->installEventFilter (gtkqt_bridge (w));
+  e->viewport ()->setMouseTracking (true);   /* motion over links, as GTK reports it */
   return e;
 }
 
@@ -2125,6 +2152,21 @@ GdkPixbuf *gtk_text_iter_get_pixbuf (const GtkTextIter *iter)
   return f.isImageFormat () ? bd (ib (iter))->pixbufs.value (f.toImageFormat ().name ()) : nullptr;
 }
 
+/* an anchored widget whose size request changes lays its anchor out again */
+class GtkQtAnchorWatch : public QObject {
+public:
+  GtkTextChildAnchor *anchor;
+  GtkQtAnchorWatch (QObject *parent, GtkTextChildAnchor *a) : QObject (parent), anchor (a) {}
+  bool eventFilter (QObject *, QEvent *e) override
+  {
+    if (e->type () == QEvent::LayoutRequest) {
+      int off = anchor_offset (anchor);
+      if (off >= 0) bdoc (ad (anchor)->buffer)->markContentsDirty (off, 1);
+    }
+    return false;
+  }
+};
+
 /* the widget goes into this view's viewport, where the anchor is drawn */
 void gtk_text_view_add_child_at_anchor (GtkTextView *view, GtkWidget *child, GtkTextChildAnchor *anchor)
 {
@@ -2133,6 +2175,19 @@ void gtk_text_view_add_child_at_anchor (GtkTextView *view, GtkWidget *child, Gtk
   ad (anchor)->widgets << qMakePair (QPointer<QWidget> (e->viewport ()), child);
   g_object_set_data (G_OBJECT (child), "gtkqt-text-anchor", anchor);
   gtkqt_container_adopt (GTK_CONTAINER (view), child);
+  if (QWidget *qw = gtkqt_qw (child)) qw->installEventFilter (new GtkQtAnchorWatch (qw, anchor));
+  /* GTK's resize pass allocates the view again once a child is added */
+  if (!e->property ("_gtkqt_realloc").toBool ()) {
+    e->setProperty ("_gtkqt_realloc", true);
+    QPointer<QTextEdit> guard (e);
+    GtkWidget *vw = GTK_WIDGET (view);
+    QTimer::singleShot (0, e, [guard, vw] {
+      if (!guard) return;
+      guard->setProperty ("_gtkqt_realloc", false);
+      GtkAllocation a = vw->allocation;
+      g_signal_emit_by_name (vw, "size-allocate", &a);
+    });
+  }
   int off = anchor_offset (anchor);
   if (off >= 0) bdoc (ad (anchor)->buffer)->markContentsDirty (off, 1);
 }

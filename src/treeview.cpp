@@ -1839,7 +1839,35 @@ void gtk_combo_box_set_model (GtkComboBox *combo, GtkTreeModel *model)
   c->setCurrentIndex (-1);
 }
 
-GtkTreeModel *gtk_combo_box_get_model (GtkComboBox *combo) { return (GtkTreeModel *) g_object_get_data (G_OBJECT (combo), "gtkqt-tree-model"); }
+/* A text combo's items live in the QComboBox until a program asks for its
+ * model; from then on, as in GTK, they are a GtkListStore (text, id) */
+GtkTreeModel *gtk_combo_box_get_model (GtkComboBox *combo)
+{
+  auto *m = (GtkTreeModel *) g_object_get_data (G_OBJECT (combo), "gtkqt-tree-model");
+  if (m || !GTK_IS_COMBO_BOX_TEXT (combo)) return m;
+  auto *c = gtkqt_q<QComboBox> (GTK_WIDGET (combo));
+  if (!c) return nullptr;
+  GtkListStore *store = gtk_list_store_new (2, G_TYPE_STRING, G_TYPE_STRING);
+  for (int i = 0; i < c->count (); i++) {
+    GtkTreeIter it;
+    QVariant id = c->itemData (i);
+    gtk_list_store_append (store, &it);
+    gtk_list_store_set (store, &it, 0, c->itemText (i).toUtf8 ().constData (),
+                        1, id.isValid () ? id.toString ().toUtf8 ().constData () : nullptr, -1);
+  }
+  int cur = c->currentIndex ();
+  QString text = c->isEditable () ? c->currentText () : QString ();
+  GtkCellRenderer *r = gtk_cell_renderer_text_new ();
+  gtk_cell_layout_pack_start (GTK_CELL_LAYOUT (combo), r, TRUE);
+  gtk_cell_layout_add_attribute (GTK_CELL_LAYOUT (combo), r, "text", 0);
+  gtk_combo_box_set_model (combo, GTK_TREE_MODEL (store));
+  g_object_unref (store);
+  g_object_set_data (G_OBJECT (combo), "gtkqt-text-store", store);
+  QSignalBlocker block (c);
+  c->setCurrentIndex (cur);
+  if (c->isEditable ()) c->setEditText (text);
+  return GTK_TREE_MODEL (store);
+}
 
 gboolean gtk_combo_box_get_active_iter (GtkComboBox *combo, GtkTreeIter *iter)
 {

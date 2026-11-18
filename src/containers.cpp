@@ -209,7 +209,14 @@ void gtkqt_window_before_show (GtkWidget *w)
     }
     if (best) best->setFocus (Qt::TabFocusReason);
   });
-  qw->adjustSize ();
+  /* the window's full request, as GTK sizes it (adjustSize stops at 2/3
+   * of the screen); only the screen itself limits it */
+  QSize want = qw->sizeHint ().expandedTo (qw->minimumSizeHint ());
+  if (!want.isValid ()) qw->adjustSize ();
+  else {
+    if (QScreen *scr = qw->screen ()) want = want.boundedTo (scr->availableGeometry ().size ());
+    qw->resize (want.expandedTo (qw->minimumSize ()));
+  }
   QSize sz = qw->size ();
   if (d->default_w > 0 || d->default_h > 0) {
     QSize hint = qw->sizeHint ().expandedTo (qw->minimumSizeHint ());

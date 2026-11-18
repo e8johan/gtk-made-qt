@@ -216,6 +216,7 @@ GtkToolItem *gtk_separator_tool_item_new (void);
 void         gtk_tool_item_set_tooltip_text (GtkToolItem *tool_item, const gchar *text);
 void         gtk_tool_item_set_expand (GtkToolItem *tool_item, gboolean expand);
 void         gtk_tool_item_set_is_important (GtkToolItem *tool_item, gboolean is_important);
+gboolean     gtk_tool_item_get_is_important (GtkToolItem *tool_item);
 
 /* GtkAction / GtkActionGroup / GtkUIManager (GTK 2.4 - 3.x) */
 typedef struct _GtkAction GtkAction;

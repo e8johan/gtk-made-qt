@@ -179,6 +179,25 @@ void gtkqt_script_start ();
 static void setup_app ()
 {
   gtkqt_script_start ();
+  /* GTK always has its stock icons; where Qt's platform has no icon theme
+   * (offscreen, bare window managers) use an installed one */
+  {
+    /* GTK looks in the XDG data directories; some Qt platforms only in :/icons */
+    QStringList paths = QIcon::themeSearchPaths ();
+    QStringList dirs { QString::fromUtf8 (g_get_user_data_dir ()) };
+    for (const gchar *const *d = g_get_system_data_dirs (); *d; d++) dirs << QString::fromUtf8 (*d);
+    for (const QString &d : dirs)
+      if (!paths.contains (d + QStringLiteral ("/icons")) && QFile::exists (d + QStringLiteral ("/icons"))) paths << d + QStringLiteral ("/icons");
+    QIcon::setThemeSearchPaths (paths);
+  }
+  if (QIcon::themeName ().isEmpty () || QIcon::themeName () == QLatin1String ("hicolor"))
+    for (const char *t : { "breeze", "Papirus", "Humanity", "elementary", "Tango", "gnome", "Adwaita" })
+      for (const QString &dir : QIcon::themeSearchPaths ())
+        if (QFile::exists (dir + QLatin1Char ('/') + QLatin1String (t) + QStringLiteral ("/index.theme"))) {
+          QIcon::setThemeName (QLatin1String (t));
+          goto themed;
+        }
+themed:
   qApp->setQuitOnLastWindowClosed (false);
   if (g_get_prgname ())
     QCoreApplication::setApplicationName (QString::fromUtf8 (g_get_prgname ()));
@@ -451,6 +470,9 @@ QIcon gtkqt_icon (const gchar *icon_name)
   if (!icon.isNull ()) return icon;
   if (name.endsWith (QLatin1String ("-symbolic"))) {
     icon = QIcon::fromTheme (name.chopped (9));
+    if (!icon.isNull ()) return icon;
+  } else {
+    icon = QIcon::fromTheme (name + QLatin1String ("-symbolic"));   /* themes with only symbolic forms */
     if (!icon.isNull ()) return icon;
   }
   /* Fall back on Qt's built-in standard pixmaps for the common ones. */
@@ -1032,6 +1054,12 @@ static void update_allocation (GtkWidget *w, QWidget *qw)
   w->allocation.y = pos.y ();
   w->allocation.width = qw->width ();
   w->allocation.height = qw->height ();
+  /* in a GtkScrolledWindow the scroll bars and frame are the scrolled
+   * window's in GTK: the list or text gets the visible area */
+  if (auto *sa = qobject_cast<QAbstractScrollArea *> (qw); sa && w->parent && GTK_IS_SCROLLED_WINDOW (w->parent)) {
+    w->allocation.width = sa->viewport ()->width ();
+    w->allocation.height = sa->viewport ()->height ();
+  }
 }
 
 static bool handle_window_close (GtkWidget *w, QCloseEvent *ce)
@@ -1080,6 +1108,15 @@ bool GtkQtBridge::eventFilter (QObject *watched, QEvent *e)
     switch (e->type ()) {
     case QEvent::MouseButtonPress: case QEvent::MouseButtonRelease: case QEvent::MouseButtonDblClick:
     case QEvent::MouseMove: break;
+    case QEvent::Resize:
+      /* scroll bars coming and going change what a scrolled list or text is
+       * given (update_allocation): GTK allocates it again */
+      if (w->parent && GTK_IS_SCROLLED_WINDOW (w->parent) && !w->priv->destroyed) {
+        update_allocation (w, sa);
+        GtkAllocation alloc = w->allocation;
+        g_signal_emit (w, widget_signals[SIG_SIZE_ALLOCATE], 0, &alloc);
+      }
+      return false;
     default: return false;
     }
   }
