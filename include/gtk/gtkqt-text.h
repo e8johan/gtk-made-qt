@@ -12,6 +12,8 @@ G_BEGIN_DECLS
 typedef struct _GtkTextBuffer GtkTextBuffer;
 typedef struct _GtkTextBufferClass GtkTextBufferClass;
 typedef struct _GtkTextTag GtkTextTag;
+/* a place in the text where views show a widget of their own */
+typedef struct _GtkTextChildAnchor { GObject parent_instance; gpointer segment; } GtkTextChildAnchor;
 typedef struct _GtkTextTagTable GtkTextTagTable;
 typedef struct _GtkTextMark GtkTextMark;
 typedef struct _GtkIMContext GtkIMContext;
@@ -158,6 +160,29 @@ gboolean       gtk_text_iter_starts_word (const GtkTextIter *iter);
 gboolean       gtk_text_iter_ends_word (const GtkTextIter *iter);
 gboolean       gtk_text_iter_inside_word (const GtkTextIter *iter);
 gboolean       gtk_text_iter_is_cursor_position (const GtkTextIter *iter);
+/* tags at a position, and where they start and end */
+gboolean       gtk_text_iter_has_tag (const GtkTextIter *iter, GtkTextTag *tag);
+GSList        *gtk_text_iter_get_tags (const GtkTextIter *iter);
+GSList        *gtk_text_iter_get_toggled_tags (const GtkTextIter *iter, gboolean toggled_on);
+gboolean       gtk_text_iter_begins_tag (const GtkTextIter *iter, GtkTextTag *tag);
+gboolean       gtk_text_iter_starts_tag (const GtkTextIter *iter, GtkTextTag *tag);
+gboolean       gtk_text_iter_ends_tag (const GtkTextIter *iter, GtkTextTag *tag);
+gboolean       gtk_text_iter_toggles_tag (const GtkTextIter *iter, GtkTextTag *tag);
+gboolean       gtk_text_iter_forward_to_tag_toggle (GtkTextIter *iter, GtkTextTag *tag);
+gboolean       gtk_text_iter_backward_to_tag_toggle (GtkTextIter *iter, GtkTextTag *tag);
+/* images and child anchors in the text */
+GdkPixbuf     *gtk_text_iter_get_pixbuf (const GtkTextIter *iter);
+GtkTextChildAnchor *gtk_text_iter_get_child_anchor (const GtkTextIter *iter);
+#define GTK_TYPE_TEXT_CHILD_ANCHOR    (gtk_text_child_anchor_get_type ())
+#define GTK_TEXT_CHILD_ANCHOR(o)      (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_TEXT_CHILD_ANCHOR, GtkTextChildAnchor))
+#define GTK_IS_TEXT_CHILD_ANCHOR(o)   (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_TEXT_CHILD_ANCHOR))
+GType               gtk_text_child_anchor_get_type (void) G_GNUC_CONST;
+GtkTextChildAnchor *gtk_text_child_anchor_new (void);
+GList              *gtk_text_child_anchor_get_widgets (GtkTextChildAnchor *anchor);
+gboolean            gtk_text_child_anchor_get_deleted (GtkTextChildAnchor *anchor);
+void                gtk_text_buffer_insert_pixbuf (GtkTextBuffer *buffer, GtkTextIter *iter, GdkPixbuf *pixbuf);
+void                gtk_text_buffer_insert_child_anchor (GtkTextBuffer *buffer, GtkTextIter *iter, GtkTextChildAnchor *anchor);
+GtkTextChildAnchor *gtk_text_buffer_create_child_anchor (GtkTextBuffer *buffer, GtkTextIter *iter);
 typedef gboolean (*GtkTextCharPredicate) (gunichar ch, gpointer user_data);
 gboolean       gtk_text_iter_forward_find_char (GtkTextIter *iter, GtkTextCharPredicate pred, gpointer user_data, const GtkTextIter *limit);
 gboolean       gtk_text_iter_backward_find_char (GtkTextIter *iter, GtkTextCharPredicate pred, gpointer user_data, const GtkTextIter *limit);
@@ -187,6 +212,7 @@ typedef struct _GtkTextView {
   GtkJustification justify;
   gint left_margin, right_margin, indent, pixels_above_lines, pixels_below_lines, pixels_inside_wrap;
   gint xoffset, yoffset, width, height;
+  GtkAdjustment *hadjustment, *vadjustment;   /* GTK 2: the scroll position, kept in step */
   /*< private >*/
   gpointer priv;
 } GtkTextView;
@@ -224,6 +250,9 @@ void           gtk_text_view_set_right_margin (GtkTextView *text_view, gint righ
 void           gtk_text_view_set_top_margin (GtkTextView *text_view, gint top_margin);
 void           gtk_text_view_set_bottom_margin (GtkTextView *text_view, gint bottom_margin);
 void           gtk_text_view_set_pixels_above_lines (GtkTextView *text_view, gint pixels);
+void           gtk_text_view_set_pixels_inside_wrap (GtkTextView *text_view, gint pixels);
+gint           gtk_text_view_get_pixels_inside_wrap (GtkTextView *text_view);
+void           gtk_text_view_add_child_at_anchor (GtkTextView *text_view, GtkWidget *child, GtkTextChildAnchor *anchor);
 void           gtk_text_view_set_pixels_below_lines (GtkTextView *text_view, gint pixels);
 void           gtk_text_view_set_accepts_tab (GtkTextView *text_view, gboolean accepts_tab);
 void           gtk_text_view_scroll_to_mark (GtkTextView *text_view, GtkTextMark *mark, gdouble within_margin,

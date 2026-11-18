@@ -861,6 +861,12 @@ static void gtk_widget_class_init (GtkWidgetClass *klass)
   widget_signals[SIG_ENTER] = sigev ("enter-notify-event", G_STRUCT_OFFSET (GtkWidgetClass, enter_notify_event));
   widget_signals[SIG_LEAVE] = sigev ("leave-notify-event", G_STRUCT_OFFSET (GtkWidgetClass, leave_notify_event));
   widget_signals[SIG_CONFIGURE] = sigev ("configure-event", G_STRUCT_OFFSET (GtkWidgetClass, configure_event));
+  sigev ("window-state-event", 0);
+  sigev ("map-event", 0);
+  /* GTK 2: handlers may change the requisition; Qt lays out by size hints */
+  g_signal_new ("size-request", t, G_SIGNAL_RUN_FIRST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 1, G_TYPE_POINTER);
+  sigev ("unmap-event", 0);
+  sigev ("visibility-notify-event", 0);
   widget_signals[SIG_FOCUS_IN] = sigev ("focus-in-event", G_STRUCT_OFFSET (GtkWidgetClass, focus_in_event));
   widget_signals[SIG_FOCUS_OUT] = sigev ("focus-out-event", G_STRUCT_OFFSET (GtkWidgetClass, focus_out_event));
   widget_signals[SIG_EXPOSE] = sigev ("expose-event", G_STRUCT_OFFSET (GtkWidgetClass, expose_event));
@@ -1065,9 +1071,24 @@ QWidget *gtkqt_content (GtkWidget *w)
 bool GtkQtBridge::eventFilter (QObject *watched, QEvent *e)
 {
   GtkWidget *w = widget;
-  if (!w || watched != w->priv->obj.data ()) return false;
+  if (!w) return false;
+  if (watched != w->priv->obj.data ()) {
+    /* a list's rows live in its scroll area's viewport, GTK's bin_window:
+     * mouse events there reach the widget in viewport coordinates */
+    auto *sa = qobject_cast<QAbstractScrollArea *> (w->priv->obj.data ());
+    if (!sa || watched != sa->viewport ()) return false;
+    switch (e->type ()) {
+    case QEvent::MouseButtonPress: case QEvent::MouseButtonRelease: case QEvent::MouseButtonDblClick:
+    case QEvent::MouseMove: break;
+    default: return false;
+    }
+  }
   QWidget *qw = qobject_cast<QWidget *> (watched);
   if (!qw) return false;
+  /* events in a viewport come from its GdkWindow (GtkTreeView's bin_window) */
+  GdkWindow *evwin = w->window;
+  if (watched != w->priv->obj.data ())
+    if (void *p = qw->property ("_gtkqt_gdkwindow").value<void *> ()) evwin = (GdkWindow *) p;
   GtkQtEmitGuard guard;
   struct Keep { GtkWidget *w; ~Keep () { g_object_unref (w); } } keep { (GtkWidget *) g_object_ref (w) };
   bool consumed = false;
@@ -1098,10 +1119,16 @@ bool GtkQtBridge::eventFilter (QObject *watched, QEvent *e)
     ensure_realized (w);
     w->flags |= GTK_MAPPED | GTK_REALIZED;
     g_signal_emit (w, widget_signals[SIG_MAP], 0);
+    ev.any.type = GDK_MAP;
+    ev.any.window = w->window;
+    if (!w->priv->destroyed) gtkqt_emit_event (w, &ev, "map-event");
     return false;
   case QEvent::Hide:
     w->flags &= ~GTK_MAPPED;
     g_signal_emit (w, widget_signals[SIG_UNMAP], 0);
+    ev.any.type = GDK_UNMAP;
+    ev.any.window = w->window;
+    if (!w->priv->destroyed) gtkqt_emit_event (w, &ev, "unmap-event");
     return false;
   case QEvent::MouseButtonPress:
   case QEvent::MouseButtonRelease:
@@ -1113,7 +1140,7 @@ bool GtkQtBridge::eventFilter (QObject *watched, QEvent *e)
     QPointF lp = me->localPos (), gp = me->screenPos ();
 #endif
     ev.button.type = e->type () == QEvent::MouseButtonRelease ? GDK_BUTTON_RELEASE : GDK_BUTTON_PRESS;
-    ev.button.window = w->window;
+    ev.button.window = evwin;
     ev.button.time = me->timestamp ();
     ev.button.x = lp.x ();
     ev.button.y = lp.y ();
@@ -1137,7 +1164,7 @@ bool GtkQtBridge::eventFilter (QObject *watched, QEvent *e)
     QPointF lp = me->localPos (), gp = me->screenPos ();
 #endif
     ev.motion.type = GDK_MOTION_NOTIFY;
-    ev.motion.window = w->window;
+    ev.motion.window = evwin;
     ev.motion.time = me->timestamp ();
     ev.motion.x = lp.x ();
     ev.motion.y = lp.y ();
@@ -1182,7 +1209,28 @@ bool GtkQtBridge::eventFilter (QObject *watched, QEvent *e)
     ev.key.length = txt.size ();
     ev.key.is_modifier = ke->key () == Qt::Key_Shift || ke->key () == Qt::Key_Control ||
                          ke->key () == Qt::Key_Alt || ke->key () == Qt::Key_Meta;
-    return gtkqt_emit_event (w, &ev, ev.key.type == GDK_KEY_PRESS ? "key-press-event" : "key-release-event");
+    bool handled = gtkqt_emit_event (w, &ev, ev.key.type == GDK_KEY_PRESS ? "key-press-event" : "key-release-event");
+    if (!handled && ev.key.type == GDK_KEY_PRESS && !w->priv->destroyed)
+      handled = gtkqt_bindings_activate (w, ev.key.keyval, ev.key.state);
+    return handled;
+  }
+  case QEvent::WindowStateChange: {
+    if (!qw->isWindow ()) return false;
+    auto gdk_state = [] (Qt::WindowStates s, bool active) {
+      guint r = 0;
+      if (s & Qt::WindowMinimized) r |= GDK_WINDOW_STATE_ICONIFIED;
+      if (s & Qt::WindowMaximized) r |= GDK_WINDOW_STATE_MAXIMIZED;
+      if (s & Qt::WindowFullScreen) r |= GDK_WINDOW_STATE_FULLSCREEN;
+      if (active) r |= GDK_WINDOW_STATE_FOCUSED;
+      return (GdkWindowState) r;
+    };
+    GdkWindowState old = gdk_state (static_cast<QWindowStateChangeEvent *> (e)->oldState (), qw->isActiveWindow ());
+    ev.window_state.type = GDK_WINDOW_STATE;
+    ev.window_state.window = w->window;
+    ev.window_state.new_window_state = gdk_state (qw->windowState (), qw->isActiveWindow ());
+    ev.window_state.changed_mask = (GdkWindowState) (old ^ ev.window_state.new_window_state);
+    gtkqt_emit_event (w, &ev, "window-state-event");
+    return false;
   }
   case QEvent::Enter:
   case QEvent::Leave: {
@@ -1894,6 +1942,59 @@ static void container_unplace_default (GtkContainer *, GtkWidget *child)
   }
 }
 
+/* GTK 2's public children fields: GtkBox->children (GtkBoxChild records
+ * with the packing) and GtkMenuShell->children, from the container's list */
+/* Bring a public child list in line with the widget's children, keeping
+ * the nodes of children that stay: programs walk these lists and keep
+ * l->next while they destroy l->data, as GTK allows */
+static void sync_child_list (GList **list, GList *children, bool box)
+{
+  auto widget_of = [box] (GList *n) { return box ? ((GtkBoxChild *) n->data)->widget : (GtkWidget *) n->data; };
+  QHash<GtkWidget *, GList *> nodes;
+  for (GList *n = *list, *next; n; n = next) {
+    next = n->next;
+    GtkWidget *cw = widget_of (n);
+    if (g_list_find (children, cw) && !nodes.contains (cw)) { nodes.insert (cw, n); continue; }
+    if (box) g_free (n->data);
+    *list = g_list_delete_link (*list, n);
+  }
+  GList *head = nullptr, *prev = nullptr;
+  for (GList *l = children; l; l = l->next) {
+    auto *cw = (GtkWidget *) l->data;
+    GList *n = nodes.value (cw);
+    if (!n) {
+      n = g_list_alloc ();
+      if (box) { auto *info = g_new0 (GtkBoxChild, 1); info->widget = cw; n->data = info; }
+      else n->data = cw;
+    }
+    n->prev = prev;
+    n->next = nullptr;
+    if (prev) prev->next = n; else head = n;
+    prev = n;
+  }
+  *list = head;
+}
+
+void gtkqt_sync_public_children (GtkWidget *w)
+{
+  if (GTK_IS_BOX (w)) {
+    GtkBox *box = GTK_BOX (w);
+    sync_child_list (&box->children, w->priv->children, true);
+    for (GList *l = box->children; l; l = l->next) {
+      auto *info = (GtkBoxChild *) l->data;
+      GtkWidget *child = info->widget;
+      info->padding = (guint16) child->priv->pack_padding;
+      info->expand = child->priv->pack_expand != FALSE;
+      info->fill = child->priv->pack_fill != FALSE;
+      info->pack = child->priv->pack_type;
+    }
+    box->spacing = (gint16) gtk_box_get_spacing (box);
+    box->homogeneous = gtk_box_get_homogeneous (box) != FALSE;
+  } else if (GTK_IS_MENU_SHELL (w)) {
+    sync_child_list (&GTK_MENU_SHELL (w)->children, w->priv->children, false);
+  }
+}
+
 void gtkqt_container_adopt (GtkContainer *container, GtkWidget *child)
 {
   GtkWidget *cw = GTK_WIDGET (container);
@@ -1904,6 +2005,7 @@ void gtkqt_container_adopt (GtkContainer *container, GtkWidget *child)
   auto place = (GtkQtPlaceFunc) GTK_CONTAINER_GET_CLASS (container)->gtkqt_place;
   if (place) place (container, child);
   gtkqt_sync_visible (child);
+  gtkqt_sync_public_children (cw);
   g_object_notify (G_OBJECT (child), "parent");
   if (gtkqt_builder_accels_waiting) gtkqt_builder_accels_retry ();
 }
@@ -1917,6 +2019,7 @@ void gtkqt_container_release (GtkContainer *container, GtkWidget *child)
   cw->priv->children = g_list_remove (cw->priv->children, child);
   if (GTK_IS_BIN (container) && GTK_BIN (container)->child == child) GTK_BIN (container)->child = nullptr;
   child->parent = nullptr;
+  gtkqt_sync_public_children (cw);
   g_object_unref (child);
 }
 

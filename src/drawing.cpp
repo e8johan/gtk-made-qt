@@ -744,56 +744,7 @@ cairo_surface_t *gdk_window_create_similar_surface (GdkWindow *, cairo_content_t
 
 } /* extern "C" */
 
-/* ======================================================================
- * GdkPixbuf (minimal, backed by QImage)
- * ====================================================================== */
-struct _GdkPixbuf { GObject parent_instance; gpointer image; };
-typedef struct { GObjectClass parent_class; } GdkPixbufClass;
-G_DEFINE_TYPE (GdkPixbuf, gdk_pixbuf, G_TYPE_OBJECT)
-static void gdk_pixbuf_init (GdkPixbuf *) {}
-static void pixbuf_finalize (GObject *o)
-{
-  delete static_cast<QImage *> (((GdkPixbuf *) o)->image);
-  G_OBJECT_CLASS (gdk_pixbuf_parent_class)->finalize (o);
-}
-static void gdk_pixbuf_class_init (GdkPixbufClass *klass) { G_OBJECT_CLASS (klass)->finalize = pixbuf_finalize; }
-
-GdkPixbuf *gtkqt_pixbuf_from_image (const QImage &image)
-{
-  auto *p = (GdkPixbuf *) g_object_new (gdk_pixbuf_get_type (), nullptr);
-  p->image = new QImage (image);
-  return p;
-}
-
-QImage gtkqt_pixbuf_image (GdkPixbuf *pixbuf)
-{
-  return pixbuf && pixbuf->image ? *static_cast<QImage *> (pixbuf->image) : QImage ();
-}
-
 extern "C" {
-
-GdkPixbuf *gdk_pixbuf_new_from_file (const char *filename, GError **error)
-{
-  QImage img (QString::fromUtf8 (filename));
-  if (img.isNull ()) {
-    g_set_error (error, G_FILE_ERROR, G_FILE_ERROR_NOENT, "Failed to load image '%s'", filename);
-    return nullptr;
-  }
-  return gtkqt_pixbuf_from_image (img);
-}
-
-GdkPixbuf *gdk_pixbuf_new_from_file_at_size (const char *filename, int width, int height, GError **error)
-{
-  GdkPixbuf *p = gdk_pixbuf_new_from_file (filename, error);
-  if (p) {
-    QImage *img = static_cast<QImage *> (p->image);
-    *img = img->scaled (width > 0 ? width : img->width (), height > 0 ? height : img->height (), Qt::KeepAspectRatio, Qt::SmoothTransformation);
-  }
-  return p;
-}
-
-int gdk_pixbuf_get_width (const GdkPixbuf *pixbuf) { return pixbuf && pixbuf->image ? static_cast<QImage *> (pixbuf->image)->width () : 0; }
-int gdk_pixbuf_get_height (const GdkPixbuf *pixbuf) { return pixbuf && pixbuf->image ? static_cast<QImage *> (pixbuf->image)->height () : 0; }
 
 void gdk_cairo_set_source_pixbuf (cairo_t *cr, const GdkPixbuf *pixbuf, double x, double y)
 {

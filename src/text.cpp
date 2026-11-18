@@ -48,10 +48,23 @@ static QTextBlockFormat &tag_block (GtkTextTag *t)
   return *static_cast<QTextBlockFormat *> (t->block);
 }
 
-static void gtk_text_tag_init (GtkTextTag *) {}
+/* Each tag marks the text it is applied to with a property of its own, so
+ * the tags at a position can be found again (has_tag, get_tags, toggles) */
+enum { TAG_PROPERTY_BASE = QTextFormat::UserProperty + 0x1000, ANCHOR_PROPERTY = QTextFormat::UserProperty + 1 };
+static QHash<int, GtkTextTag *> tags_by_id;
+static int tag_id (GtkTextTag *t) { return GPOINTER_TO_INT (g_object_get_data (G_OBJECT (t), "gtkqt-tag-id")); }
+static void gtk_text_tag_init (GtkTextTag *t)
+{
+  static int next_id;
+  int id = ++next_id;
+  g_object_set_data (G_OBJECT (t), "gtkqt-tag-id", GINT_TO_POINTER (id));
+  tags_by_id.insert (id, t);
+  tag_fmt (t).setProperty (TAG_PROPERTY_BASE + id, true);
+}
 static void gtk_text_tag_finalize (GObject *o)
 {
   auto *t = (GtkTextTag *) o;
+  tags_by_id.remove (tag_id (t));
   g_free (t->name);
   delete static_cast<QTextCharFormat *> (t->format);
   delete static_cast<QTextBlockFormat *> (t->block);
@@ -125,6 +138,17 @@ static void gtk_text_tag_class_init (GtkTextTagClass *klass)
                 static const Qt::Alignment map[] = { Qt::AlignLeft, Qt::AlignRight, Qt::AlignHCenter, Qt::AlignJustify };
                 tag_block ((GtkTextTag *) o).setAlignment (map[qBound (0, g_value_get_int (v), 3)]);
               }, nullptr);
+  /* GTK 2 colours (GdkColor) */
+  gtkqt_prop (klass, g_param_spec_boxed ("foreground-gdk", nullptr, nullptr, GDK_TYPE_COLOR, G_PARAM_WRITABLE),
+              TAG_SET (if (auto *c = (GdkColor *) g_value_get_boxed (v)) f.setForeground (QColor (c->red >> 8, c->green >> 8, c->blue >> 8))), nullptr);
+  gtkqt_prop (klass, g_param_spec_boxed ("background-gdk", nullptr, nullptr, GDK_TYPE_COLOR, G_PARAM_WRITABLE),
+              TAG_SET (if (auto *c = (GdkColor *) g_value_get_boxed (v)) f.setBackground (QColor (c->red >> 8, c->green >> 8, c->blue >> 8))), nullptr);
+  /* the "-set" flags: a set property is set already */
+  for (const char *name : { "foreground-set", "background-set", "weight-set", "style-set", "underline-set", "strikethrough-set",
+                            "size-set", "scale-set", "family-set", "pixels-above-lines-set", "pixels-below-lines-set",
+                            "left-margin-set", "right-margin-set", "indent-set", "justification-set", "editable-set",
+                            "wrap-mode-set", "invisible-set", "paragraph-background-set" })
+    gtkqt_prop (klass, g_param_spec_boolean (name, nullptr, nullptr, FALSE, G_PARAM_READWRITE), [] (GObject *, const GValue *) {}, nullptr);
   gtkqt_prop (klass, g_param_spec_int ("left-margin", nullptr, nullptr, 0, G_MAXINT, 0, G_PARAM_WRITABLE),
               [] (GObject *o, const GValue *v) { tag_block ((GtkTextTag *) o).setLeftMargin (g_value_get_int (v)); }, nullptr);
   gtkqt_prop (klass, g_param_spec_int ("right-margin", nullptr, nullptr, 0, G_MAXINT, 0, G_PARAM_WRITABLE),
@@ -158,6 +182,8 @@ struct BufferData {
   QList<QPointer<QTextEdit>> views;
   int user_action = 0;
   bool edit_block = false;
+  QHash<QString, GdkPixbuf *> pixbufs;         /* inserted images, by resource name */
+  QList<GtkTextChildAnchor *> anchors;
 };
 
 static BufferData *bd (GtkTextBuffer *b) { return static_cast<BufferData *> (b->priv); }
@@ -214,6 +240,8 @@ static void gtk_text_buffer_finalize (GObject *o)
   BufferData *d = bd (b);
   g_list_free_full (d->marks, g_object_unref);
   for (GtkTextTag *t : d->tags) g_object_unref (t);
+  for (GdkPixbuf *p : d->pixbufs) g_object_unref (p);
+  for (GtkTextChildAnchor *a : d->anchors) g_object_unref (a);
   delete d->doc;
   delete d;
   G_OBJECT_CLASS (gtk_text_buffer_parent_class)->finalize (o);
@@ -224,6 +252,8 @@ static void real_insert_text (GtkTextBuffer *b, GtkTextIter *iter, const gchar *
 static void real_delete_range (GtkTextBuffer *b, GtkTextIter *start, GtkTextIter *end);
 static void real_apply_tag (GtkTextBuffer *b, GtkTextTag *tag, const GtkTextIter *start, const GtkTextIter *end);
 static void real_remove_tag (GtkTextBuffer *b, GtkTextTag *tag, const GtkTextIter *start, const GtkTextIter *end);
+static void real_insert_pixbuf (GtkTextBuffer *b, GtkTextIter *iter, gpointer pixbuf);
+static void real_insert_child_anchor (GtkTextBuffer *b, GtkTextIter *iter, gpointer anchor);
 }
 
 static void gtk_text_buffer_class_init (GtkTextBufferClass *klass)
@@ -251,6 +281,12 @@ static void gtk_text_buffer_class_init (GtkTextBufferClass *klass)
                 nullptr, G_TYPE_NONE, 0);
   g_signal_new ("end-user-action", t, G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET (GtkTextBufferClass, end_user_action), nullptr, nullptr,
                 nullptr, G_TYPE_NONE, 0);
+  g_signal_new ("insert-pixbuf", t, G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET (GtkTextBufferClass, insert_pixbuf), nullptr, nullptr, nullptr,
+                G_TYPE_NONE, 2, GTK_TYPE_TEXT_ITER | G_SIGNAL_TYPE_STATIC_SCOPE, G_TYPE_OBJECT);
+  g_signal_new ("insert-child-anchor", t, G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET (GtkTextBufferClass, insert_child_anchor), nullptr,
+                nullptr, nullptr, G_TYPE_NONE, 2, GTK_TYPE_TEXT_ITER | G_SIGNAL_TYPE_STATIC_SCOPE, G_TYPE_OBJECT);
+  klass->insert_pixbuf = real_insert_pixbuf;
+  klass->insert_child_anchor = real_insert_child_anchor;
   klass->insert_text = real_insert_text;
   klass->delete_range = real_delete_range;
   klass->apply_tag = real_apply_tag;
@@ -342,12 +378,16 @@ gchar *gtk_text_buffer_get_text (GtkTextBuffer *b, const GtkTextIter *start, con
 {
   int s = iter_off (start), e = end ? iter_off (end) : end_offset (b);
   if (e < s) qSwap (s, e);
-  return g_strdup (bdoc (b)->toPlainText ().mid (s, e - s).toUtf8 ().constData ());
+  /* images and child anchors are left out, as in GTK */
+  return g_strdup (bdoc (b)->toPlainText ().mid (s, e - s).remove (QChar::ObjectReplacementCharacter).toUtf8 ().constData ());
 }
 
-gchar *gtk_text_buffer_get_slice (GtkTextBuffer *b, const GtkTextIter *start, const GtkTextIter *end, gboolean h)
+/* with U+FFFC for images and child anchors */
+gchar *gtk_text_buffer_get_slice (GtkTextBuffer *b, const GtkTextIter *start, const GtkTextIter *end, gboolean)
 {
-  return gtk_text_buffer_get_text (b, start, end, h);
+  int s = iter_off (start), e = end ? iter_off (end) : end_offset (b);
+  if (e < s) qSwap (s, e);
+  return g_strdup (bdoc (b)->toPlainText ().mid (s, e - s).toUtf8 ().constData ());
 }
 
 static void real_insert_text (GtkTextBuffer *b, GtkTextIter *iter, const gchar *text, gint len)
@@ -1263,6 +1303,10 @@ static GtkQtTextEdit *text_edit (GtkTextView *v) { return v ? dynamic_cast<GtkQt
 static QObject *text_view_create (GtkWidget *w)
 {
   auto *e = new GtkQtTextEdit (w);
+  /* GTK 2's hadjustment / vadjustment fields: the scroll bars' positions */
+  auto *v = GTK_TEXT_VIEW (w);
+  v->hadjustment = gtkqt_scrollbar_adjustment (G_OBJECT (w), "gtkqt-hadj", e->horizontalScrollBar ());
+  v->vadjustment = gtkqt_scrollbar_adjustment (G_OBJECT (w), "gtkqt-vadj", e->verticalScrollBar ());
   return e;
 }
 
@@ -1299,11 +1343,15 @@ static void view_paste (GtkTextView *v)
   if (auto *e = text_edit (v)) e->ensureCursorVisible ();
 }
 
+static void text_view_place (GtkContainer *c, GtkWidget *child);
+static void text_view_unplace (GtkContainer *c, GtkWidget *child);
+
 static void gtk_text_view_class_init (GtkTextViewClass *klass)
 {
   G_OBJECT_CLASS (klass)->constructed = text_view_constructed;
   G_OBJECT_CLASS (klass)->dispose = text_view_dispose;
   gtkqt_set_create (GTK_WIDGET_CLASS (klass), text_view_create);
+  gtkqt_set_place (GTK_CONTAINER_CLASS (klass), text_view_place, text_view_unplace);
   GType t = G_TYPE_FROM_CLASS (klass);
   GSignalFlags action = (GSignalFlags) (G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION);
   g_signal_new ("cut-clipboard", t, action, G_STRUCT_OFFSET (GtkTextViewClass, cut_clipboard), nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
@@ -1360,6 +1408,7 @@ static void gtk_text_view_class_init (GtkTextViewClass *klass)
 static void text_view_dispose (GObject *o)
 {
   GtkTextView *v = GTK_TEXT_VIEW (o);
+  for (GList *l = g_list_copy (GTK_WIDGET (v)->priv->children), *i = l; i; i = i->next) gtk_widget_destroy (GTK_WIDGET (i->data));
   if (GtkTextBuffer *b = view_buffer (v)) {
     auto *e = gtkqt_q<QTextEdit> (GTK_WIDGET (v));
     if (e) {
@@ -1519,6 +1568,8 @@ gint gtk_text_view_get_left_margin (GtkTextView *view) { return view->left_margi
 gint gtk_text_view_get_right_margin (GtkTextView *view) { return view->right_margin; }
 void gtk_text_view_set_indent (GtkTextView *view, gint indent) { view->indent = indent; }
 void gtk_text_view_set_pixels_above_lines (GtkTextView *view, gint p) { view->pixels_above_lines = p; }
+void gtk_text_view_set_pixels_inside_wrap (GtkTextView *view, gint p) { view->pixels_inside_wrap = p; }
+gint gtk_text_view_get_pixels_inside_wrap (GtkTextView *view) { return view->pixels_inside_wrap; }
 void gtk_text_view_set_pixels_below_lines (GtkTextView *view, gint p) { view->pixels_below_lines = p; }
 void gtk_text_view_set_accepts_tab (GtkTextView *view, gboolean accepts_tab)
 {
@@ -1850,3 +1901,309 @@ gint gtk_text_tag_table_get_size (GtkTextTagTable *table)
   return tags ? tags->size () : 0;
 }
 } /* extern "C" */
+
+/* ======================================================================
+ * Tags at a position; images and child anchors in the text
+ * ====================================================================== */
+/* the format of the character at off (a paragraph end's is the next block's) */
+static QTextCharFormat char_format_at (GtkTextBuffer *b, int off)
+{
+  QTextBlock bl = bdoc (b)->findBlock (off);
+  if (!bl.isValid ()) return QTextCharFormat ();
+  if (off == bl.position () + bl.length () - 1) return bl.next ().isValid () ? bl.next ().charFormat () : QTextCharFormat ();
+  for (auto it = bl.begin (); !it.atEnd (); ++it)
+    if (it.fragment ().contains (off)) return it.fragment ().charFormat ();
+  return QTextCharFormat ();
+}
+
+static QList<GtkTextTag *> tags_at (GtkTextBuffer *b, int off)
+{
+  QList<GtkTextTag *> l;
+  if (off < 0 || off >= end_offset (b)) return l;
+  const auto props = char_format_at (b, off).properties ();
+  for (auto it = props.begin (); it != props.end (); ++it)
+    if (it.key () > TAG_PROPERTY_BASE)
+      if (GtkTextTag *t = tags_by_id.value (it.key () - TAG_PROPERTY_BASE)) l << t;
+  std::sort (l.begin (), l.end (), [] (GtkTextTag *x, GtkTextTag *y) { return tag_id (x) < tag_id (y); });
+  return l;
+}
+
+static bool has_tag_at (GtkTextBuffer *b, int off, GtkTextTag *tag)
+{
+  return tag ? tags_at (b, off).contains (tag) : !tags_at (b, off).isEmpty ();
+}
+
+static bool begins_at (GtkTextBuffer *b, int off, GtkTextTag *tag)
+{
+  if (!tag) {
+    QList<GtkTextTag *> now = tags_at (b, off), before = off > 0 ? tags_at (b, off - 1) : QList<GtkTextTag *> ();
+    for (GtkTextTag *t : now) if (!before.contains (t)) return true;
+    return false;
+  }
+  return has_tag_at (b, off, tag) && (off == 0 || !has_tag_at (b, off - 1, tag));
+}
+
+static bool ends_at (GtkTextBuffer *b, int off, GtkTextTag *tag)
+{
+  if (off == 0) return false;
+  if (!tag) {
+    QList<GtkTextTag *> now = tags_at (b, off), before = tags_at (b, off - 1);
+    for (GtkTextTag *t : before) if (!now.contains (t)) return true;
+    return false;
+  }
+  return has_tag_at (b, off - 1, tag) && !has_tag_at (b, off, tag);
+}
+
+/* where formats can change after off: fragment and paragraph boundaries */
+static int next_boundary (GtkTextBuffer *b, int off)
+{
+  QTextBlock bl = bdoc (b)->findBlock (off);
+  if (!bl.isValid ()) return end_offset (b);
+  for (auto it = bl.begin (); !it.atEnd (); ++it) {
+    QTextFragment f = it.fragment ();
+    if (f.position () > off) return f.position ();
+    if (f.position () + f.length () > off) return f.position () + f.length ();
+  }
+  int sep = bl.position () + bl.length () - 1;
+  return sep > off ? sep : sep + 1;
+}
+
+/* an anchor's widgets, one per view (the view's viewport) */
+struct AnchorData {
+  GtkTextBuffer *buffer = nullptr;
+  QList<QPair<QPointer<QWidget>, GtkWidget *>> widgets;
+  bool deleted = false;
+};
+typedef struct { GObjectClass parent_class; } GtkTextChildAnchorClass;
+G_DEFINE_TYPE (GtkTextChildAnchor, gtk_text_child_anchor, G_TYPE_OBJECT)
+static AnchorData *ad (GtkTextChildAnchor *a) { return static_cast<AnchorData *> (a->segment); }
+static void gtk_text_child_anchor_init (GtkTextChildAnchor *a) { a->segment = new AnchorData; }
+static void anchor_finalize (GObject *o)
+{
+  delete ad ((GtkTextChildAnchor *) o);
+  G_OBJECT_CLASS (gtk_text_child_anchor_parent_class)->finalize (o);
+}
+static void gtk_text_child_anchor_class_init (GtkTextChildAnchorClass *klass) { G_OBJECT_CLASS (klass)->finalize = anchor_finalize; }
+
+static GtkTextChildAnchor *anchor_of (const QTextFormat &f)
+{
+  return f.hasProperty (ANCHOR_PROPERTY) ? (GtkTextChildAnchor *) (quintptr) f.property (ANCHOR_PROPERTY).toULongLong () : nullptr;
+}
+
+static QWidget *anchor_widget (GtkTextChildAnchor *a, QWidget *viewport)
+{
+  for (auto &p : ad (a)->widgets)
+    if (p.first == viewport && !p.second->priv->destroyed) return gtkqt_qw (p.second);
+  return nullptr;
+}
+
+/* Lays out anchors as inline objects the size of their widget, and puts
+ * the widget where the object is drawn. qobject_cast finds the interface
+ * through qt_metacast, written out here (no moc). */
+enum { ANCHOR_OBJECT = QTextFormat::UserObject + 7 };
+class GtkQtAnchorHandler : public QObject, public QTextObjectInterface {
+public:
+  using QObject::QObject;
+  void *qt_metacast (const char *name) override
+  {
+    if (name && !strcmp (name, qobject_interface_iid<QTextObjectInterface *> ())) return static_cast<QTextObjectInterface *> (this);
+    return QObject::qt_metacast (name);
+  }
+  QSizeF intrinsicSize (QTextDocument *, int, const QTextFormat &f) override
+  {
+    GtkTextChildAnchor *a = anchor_of (f);
+    if (!a) return QSizeF ();
+    for (auto &p : ad (a)->widgets)
+      if (p.first && !p.second->priv->destroyed && gtk_widget_get_visible (p.second))
+        if (QWidget *w = gtkqt_qw (p.second)) return QSizeF (w->sizeHint ().expandedTo (w->minimumSize ()));
+    return QSizeF ();
+  }
+  void drawObject (QPainter *painter, const QRectF &rect, QTextDocument *, int, const QTextFormat &f) override
+  {
+    GtkTextChildAnchor *a = anchor_of (f);
+    auto *viewport = dynamic_cast<QWidget *> (painter->device ());
+    QWidget *w = a && viewport ? anchor_widget (a, viewport) : nullptr;
+    if (!w) return;
+    QRect r = painter->transform ().mapRect (rect).toRect ();
+    if (w->geometry () != r) w->setGeometry (r);
+  }
+};
+
+static void anchors_enable (GtkTextBuffer *b)
+{
+  QAbstractTextDocumentLayout *l = bdoc (b)->documentLayout ();
+  if (!l->property ("_gtkqt_anchors").toBool ()) {
+    l->registerHandler (ANCHOR_OBJECT, new GtkQtAnchorHandler (l));
+    l->setProperty ("_gtkqt_anchors", true);
+  }
+}
+
+static int anchor_offset (GtkTextChildAnchor *a)
+{
+  GtkTextBuffer *b = ad (a)->buffer;
+  if (!b || ad (a)->deleted) return -1;
+  QString text = bdoc (b)->toPlainText ();
+  for (int i = text.indexOf (QChar::ObjectReplacementCharacter); i >= 0; i = text.indexOf (QChar::ObjectReplacementCharacter, i + 1))
+    if (anchor_of (char_format_at (b, i)) == a) return i;
+  ad (a)->deleted = true;
+  return -1;
+}
+
+extern "C" {
+
+static void real_insert_pixbuf (GtkTextBuffer *b, GtkTextIter *iter, gpointer pixbuf)
+{
+  if (!GDK_IS_PIXBUF (pixbuf)) return;
+  QString name = QStringLiteral ("gtkqt-pixbuf:%1").arg ((quintptr) pixbuf, 0, 16);
+  QImage img = gtkqt_pixbuf_image ((GdkPixbuf *) pixbuf);
+  bdoc (b)->addResource (QTextDocument::ImageResource, QUrl (name), img);
+  if (!bd (b)->pixbufs.contains (name)) bd (b)->pixbufs.insert (name, (GdkPixbuf *) g_object_ref (pixbuf));
+  int pos = qBound (0, iter_off (iter), end_offset (b));
+  QTextCursor c (bdoc (b));
+  c.setPosition (pos);
+  QTextImageFormat f;
+  f.setName (name);
+  f.setWidth (img.width ());
+  f.setHeight (img.height ());
+  c.insertImage (f);
+  buffer_pull_cursor (b);
+  iter_init (iter, b, pos + 1);
+}
+
+static void real_insert_child_anchor (GtkTextBuffer *b, GtkTextIter *iter, gpointer anchor)
+{
+  auto *a = (GtkTextChildAnchor *) anchor;
+  if (ad (a)->buffer) return;
+  anchors_enable (b);
+  ad (a)->buffer = b;
+  bd (b)->anchors << (GtkTextChildAnchor *) g_object_ref (a);
+  int pos = qBound (0, iter_off (iter), end_offset (b));
+  QTextCursor c (bdoc (b));
+  c.setPosition (pos);
+  QTextCharFormat f;
+  f.setObjectType (ANCHOR_OBJECT);
+  f.setProperty (ANCHOR_PROPERTY, (qulonglong) (quintptr) a);
+  c.insertText (QString (QChar::ObjectReplacementCharacter), f);
+  buffer_pull_cursor (b);
+  iter_init (iter, b, pos + 1);
+}
+
+void gtk_text_buffer_insert_pixbuf (GtkTextBuffer *b, GtkTextIter *iter, GdkPixbuf *pixbuf)
+{
+  g_signal_emit_by_name (b, "insert-pixbuf", iter, pixbuf);
+}
+
+void gtk_text_buffer_insert_child_anchor (GtkTextBuffer *b, GtkTextIter *iter, GtkTextChildAnchor *anchor)
+{
+  g_signal_emit_by_name (b, "insert-child-anchor", iter, anchor);
+}
+
+GtkTextChildAnchor *gtk_text_buffer_create_child_anchor (GtkTextBuffer *b, GtkTextIter *iter)
+{
+  GtkTextChildAnchor *a = gtk_text_child_anchor_new ();
+  gtk_text_buffer_insert_child_anchor (b, iter, a);
+  g_object_unref (a);   /* the buffer holds it */
+  return a;
+}
+
+GtkTextChildAnchor *gtk_text_child_anchor_new (void) { return (GtkTextChildAnchor *) g_object_new (GTK_TYPE_TEXT_CHILD_ANCHOR, nullptr); }
+
+GList *gtk_text_child_anchor_get_widgets (GtkTextChildAnchor *a)
+{
+  GList *l = nullptr;
+  for (auto &p : ad (a)->widgets) if (!p.second->priv->destroyed) l = g_list_append (l, p.second);
+  return l;
+}
+
+gboolean gtk_text_child_anchor_get_deleted (GtkTextChildAnchor *a) { return anchor_offset (a) < 0; }
+
+GtkTextChildAnchor *gtk_text_iter_get_child_anchor (const GtkTextIter *iter) { return anchor_of (char_format_at (ib (iter), iter_off (iter))); }
+
+GdkPixbuf *gtk_text_iter_get_pixbuf (const GtkTextIter *iter)
+{
+  QTextCharFormat f = char_format_at (ib (iter), iter_off (iter));
+  return f.isImageFormat () ? bd (ib (iter))->pixbufs.value (f.toImageFormat ().name ()) : nullptr;
+}
+
+/* the widget goes into this view's viewport, where the anchor is drawn */
+void gtk_text_view_add_child_at_anchor (GtkTextView *view, GtkWidget *child, GtkTextChildAnchor *anchor)
+{
+  GtkQtTextEdit *e = text_edit (view);
+  if (!e || !child || !anchor || child->parent) return;
+  ad (anchor)->widgets << qMakePair (QPointer<QWidget> (e->viewport ()), child);
+  g_object_set_data (G_OBJECT (child), "gtkqt-text-anchor", anchor);
+  gtkqt_container_adopt (GTK_CONTAINER (view), child);
+  int off = anchor_offset (anchor);
+  if (off >= 0) bdoc (ad (anchor)->buffer)->markContentsDirty (off, 1);
+}
+
+gboolean gtk_text_iter_has_tag (const GtkTextIter *iter, GtkTextTag *tag) { return tag && has_tag_at (ib (iter), iter_off (iter), tag); }
+
+GSList *gtk_text_iter_get_tags (const GtkTextIter *iter)
+{
+  GSList *l = nullptr;
+  for (GtkTextTag *t : tags_at (ib (iter), iter_off (iter))) l = g_slist_append (l, t);
+  return l;
+}
+
+GSList *gtk_text_iter_get_toggled_tags (const GtkTextIter *iter, gboolean toggled_on)
+{
+  GtkTextBuffer *b = ib (iter);
+  int off = iter_off (iter);
+  QList<GtkTextTag *> now = tags_at (b, off), before = off > 0 ? tags_at (b, off - 1) : QList<GtkTextTag *> ();
+  GSList *l = nullptr;
+  for (GtkTextTag *t : toggled_on ? now : before)
+    if (!(toggled_on ? before : now).contains (t)) l = g_slist_append (l, t);
+  return l;
+}
+
+gboolean gtk_text_iter_begins_tag (const GtkTextIter *iter, GtkTextTag *tag) { return begins_at (ib (iter), iter_off (iter), tag); }
+gboolean gtk_text_iter_starts_tag (const GtkTextIter *iter, GtkTextTag *tag) { return begins_at (ib (iter), iter_off (iter), tag); }
+gboolean gtk_text_iter_ends_tag (const GtkTextIter *iter, GtkTextTag *tag) { return ends_at (ib (iter), iter_off (iter), tag); }
+gboolean gtk_text_iter_toggles_tag (const GtkTextIter *iter, GtkTextTag *tag)
+{
+  return begins_at (ib (iter), iter_off (iter), tag) || ends_at (ib (iter), iter_off (iter), tag);
+}
+
+gboolean gtk_text_iter_forward_to_tag_toggle (GtkTextIter *iter, GtkTextTag *tag)
+{
+  GtkTextBuffer *b = ib (iter);
+  int end = end_offset (b), off = iter_off (iter);
+  if (off >= end) return FALSE;
+  for (int p = next_boundary (b, off); p < end; p = next_boundary (b, p))
+    if (begins_at (b, p, tag) || ends_at (b, p, tag)) { iter_init (iter, b, p); return TRUE; }
+  iter_init (iter, b, end);
+  return ends_at (b, end, tag);
+}
+
+gboolean gtk_text_iter_backward_to_tag_toggle (GtkTextIter *iter, GtkTextTag *tag)
+{
+  GtkTextBuffer *b = ib (iter);
+  int off = iter_off (iter);
+  for (int p = off - 1; p > 0; p--)
+    if (begins_at (b, p, tag) || ends_at (b, p, tag)) { iter_init (iter, b, p); return TRUE; }
+  iter_init (iter, b, 0);
+  return off > 0 && begins_at (b, 0, tag);
+}
+
+} /* extern "C" */
+
+static void text_view_place (GtkContainer *c, GtkWidget *child)
+{
+  GtkQtTextEdit *e = text_edit (GTK_TEXT_VIEW (c));
+  QWidget *qw = gtkqt_qw (child);
+  if (!e || !qw) return;
+  qw->setParent (e->viewport ());
+  qw->move (-10000, -10000);   /* until its anchor is drawn */
+}
+
+static void text_view_unplace (GtkContainer *, GtkWidget *child)
+{
+  if (auto *a = (GtkTextChildAnchor *) g_object_get_data (G_OBJECT (child), "gtkqt-text-anchor")) {
+    auto &l = ad (a)->widgets;
+    for (int i = l.size () - 1; i >= 0; i--) if (l[i].second == child) l.removeAt (i);
+    g_object_set_data (G_OBJECT (child), "gtkqt-text-anchor", nullptr);
+  }
+  if (QWidget *qw = gtkqt_qw (child)) qw->setParent (nullptr);
+}
+

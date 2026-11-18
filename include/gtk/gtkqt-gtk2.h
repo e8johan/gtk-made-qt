@@ -155,7 +155,7 @@ typedef struct {
   gint length;
   GdkDisplay *display;
 } GtkSelectionData;
-typedef struct { gchar *target; guint flags; guint info; } GtkTargetEntry;
+typedef struct _GtkTargetEntry { gchar *target; guint flags; guint info; } GtkTargetEntry;
 typedef struct _GtkTargetList GtkTargetList;
 typedef enum { GTK_TARGET_SAME_APP = 1 << 0, GTK_TARGET_SAME_WIDGET = 1 << 1,
                GTK_TARGET_OTHER_APP = 1 << 2, GTK_TARGET_OTHER_WIDGET = 1 << 3 } GtkTargetFlags;
@@ -318,6 +318,93 @@ void       gtk_widget_override_font (GtkWidget *widget, const PangoFontDescripti
 void       gtk_widget_override_color (GtkWidget *widget, GtkStateFlags state, const GdkRGBA *color);
 void       gtk_widget_override_background_color (GtkWidget *widget, GtkStateFlags state, const GdkRGBA *color);
 GdkDevice *gtk_get_current_event_device (void);
+
+/* odds and ends of the GTK 2 API */
+typedef struct _GtkTooltips GtkTooltips;
+gint       gdk_screen_get_width_mm (GdkScreen *screen);
+gint       gdk_screen_get_height_mm (GdkScreen *screen);
+void       gdk_threads_set_lock_functions (GCallback enter_fn, GCallback leave_fn);
+void       gdk_window_set_type_hint (GdkWindow *window, GdkWindowTypeHint hint);
+void       gtk_combo_set_case_sensitive (GtkCombo *combo, gboolean val);
+void       gtk_container_set_reallocate_redraws (GtkContainer *container, gboolean needs_redraws);
+void       gtk_drag_set_icon_default (GdkDragContext *context);
+GtkWidget *gtk_get_event_widget (GdkEvent *event);
+GtkWidget *gtk_image_new_from_pixmap (GdkPixmap *pixmap, GdkBitmap *mask);
+void       gtk_image_set_from_pixmap (GtkImage *image, GdkPixmap *pixmap, GdkBitmap *mask);
+void       gtk_menu_insert (GtkMenu *menu, GtkWidget *child, gint position);
+GtkWidget *gtk_radio_menu_item_new_with_mnemonic_from_widget (GtkRadioMenuItem *group, const gchar *label);
+GtkWidget *gtk_radio_menu_item_new_with_label_from_widget (GtkRadioMenuItem *group, const gchar *label);
+GtkWidget *gtk_radio_menu_item_new_from_widget (GtkRadioMenuItem *group);
+GtkIconSet *gtk_style_lookup_icon_set (GtkStyle *style, const gchar *stock_id);
+void       gtk_tool_item_set_homogeneous (GtkToolItem *tool_item, gboolean homogeneous);
+void       gtk_tool_item_set_tooltip (GtkToolItem *tool_item, GtkTooltips *tooltips, const gchar *tip_text, const gchar *tip_private);
+void       gtk_toolbar_set_orientation (GtkToolbar *toolbar, GtkOrientation orientation);
+gboolean   gtk_window_propagate_key_event (GtkWindow *window, GdkEventKey *event);
+void       gtk_window_set_opacity (GtkWindow *window, gdouble opacity);
+gdouble    gtk_window_get_opacity (GtkWindow *window);
+void       gtk_window_set_skip_taskbar_hint (GtkWindow *window, gboolean setting);
+void       gtk_window_set_skip_pager_hint (GtkWindow *window, gboolean setting);
+
+/* GtkAccelMap: accelerators by path ("<Main>/File/Quit"), saved and loaded
+ * in GTK's file format; menu items with the path follow changes */
+typedef void (*GtkAccelMapForeach) (gpointer data, const gchar *accel_path, guint accel_key, GdkModifierType accel_mods, gboolean changed);
+void     gtk_accel_map_add_entry (const gchar *accel_path, guint accel_key, GdkModifierType accel_mods);
+gboolean gtk_accel_map_lookup_entry (const gchar *accel_path, GtkAccelKey *key);
+gboolean gtk_accel_map_change_entry (const gchar *accel_path, guint accel_key, GdkModifierType accel_mods, gboolean replace);
+void     gtk_accel_map_load (const gchar *file_name);
+void     gtk_accel_map_save (const gchar *file_name);
+void     gtk_accel_map_foreach (gpointer data, GtkAccelMapForeach foreach_func);
+void     gtk_accel_map_lock_path (const gchar *accel_path);
+void     gtk_accel_map_unlock_path (const gchar *accel_path);
+void     gtk_widget_set_accel_path (GtkWidget *widget, const gchar *accel_path, GtkAccelGroup *accel_group);
+
+/* GtkStatusIcon: a QSystemTrayIcon */
+typedef struct _GtkStatusIcon { GObject parent_instance; gpointer priv; } GtkStatusIcon;
+typedef struct _GtkStatusIconClass { GObjectClass parent_class; } GtkStatusIconClass;
+#define GTK_TYPE_STATUS_ICON    (gtk_status_icon_get_type ())
+#define GTK_STATUS_ICON(o)      (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_STATUS_ICON, GtkStatusIcon))
+#define GTK_IS_STATUS_ICON(o)   (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_STATUS_ICON))
+GType          gtk_status_icon_get_type (void) G_GNUC_CONST;
+GtkStatusIcon *gtk_status_icon_new (void);
+GtkStatusIcon *gtk_status_icon_new_from_pixbuf (GdkPixbuf *pixbuf);
+GtkStatusIcon *gtk_status_icon_new_from_file (const gchar *filename);
+GtkStatusIcon *gtk_status_icon_new_from_stock (const gchar *stock_id);
+GtkStatusIcon *gtk_status_icon_new_from_icon_name (const gchar *icon_name);
+void      gtk_status_icon_set_from_pixbuf (GtkStatusIcon *status_icon, GdkPixbuf *pixbuf);
+void      gtk_status_icon_set_from_file (GtkStatusIcon *status_icon, const gchar *filename);
+void      gtk_status_icon_set_from_stock (GtkStatusIcon *status_icon, const gchar *stock_id);
+void      gtk_status_icon_set_from_icon_name (GtkStatusIcon *status_icon, const gchar *icon_name);
+void      gtk_status_icon_set_tooltip (GtkStatusIcon *status_icon, const gchar *tooltip_text);
+void      gtk_status_icon_set_tooltip_text (GtkStatusIcon *status_icon, const gchar *text);
+void      gtk_status_icon_set_title (GtkStatusIcon *status_icon, const gchar *title);
+void      gtk_status_icon_set_visible (GtkStatusIcon *status_icon, gboolean visible);
+gboolean  gtk_status_icon_get_visible (GtkStatusIcon *status_icon);
+void      gtk_status_icon_set_blinking (GtkStatusIcon *status_icon, gboolean blinking);
+gboolean  gtk_status_icon_get_blinking (GtkStatusIcon *status_icon);
+gboolean  gtk_status_icon_is_embedded (GtkStatusIcon *status_icon);
+gint      gtk_status_icon_get_size (GtkStatusIcon *status_icon);
+GdkPixbuf *gtk_status_icon_get_pixbuf (GtkStatusIcon *status_icon);
+void      gtk_status_icon_position_menu (GtkMenu *menu, gint *x, gint *y, gboolean *push_in, gpointer user_data);
+
+/* Key bindings (GtkBindingSet): a key press the widget's handlers leave
+ * alone emits the bound action signal, per class and its parents */
+typedef struct _GtkBindingSet {
+  gchar *set_name;
+  gint priority;
+  gpointer gtkqt_priv;
+} GtkBindingSet;
+GtkBindingSet *gtk_binding_set_new (const gchar *set_name);
+GtkBindingSet *gtk_binding_set_by_class (gpointer object_class);
+GtkBindingSet *gtk_binding_set_find (const gchar *set_name);
+void     gtk_binding_entry_add_signal (GtkBindingSet *binding_set, guint keyval, GdkModifierType modifiers,
+                                       const gchar *signal_name, guint n_args, ...);
+void     gtk_binding_entry_add_signall (GtkBindingSet *binding_set, guint keyval, GdkModifierType modifiers,
+                                        const gchar *signal_name, GSList *binding_args);
+void     gtk_binding_entry_remove (GtkBindingSet *binding_set, guint keyval, GdkModifierType modifiers);
+void     gtk_binding_entry_skip (GtkBindingSet *binding_set, guint keyval, GdkModifierType modifiers);
+void     gtk_binding_entry_clear (GtkBindingSet *binding_set, guint keyval, GdkModifierType modifiers);
+gboolean gtk_bindings_activate (GObject *object, guint keyval, GdkModifierType modifiers);
+gboolean gtk_bindings_activate_event (GObject *object, GdkEventKey *event);
 G_END_DECLS
 
 #endif

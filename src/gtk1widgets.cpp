@@ -368,6 +368,30 @@ static void clist_dispose (GObject *o)
   G_OBJECT_CLASS (gtk_clist_parent_class)->dispose (o);
 }
 
+/* keyboard scrolling (key bindings emit it): moves the focus row and selects it */
+static void clist_scroll_vertical (GtkCList *c, gint scroll_type, gfloat)
+{
+  int n = c->rows, row = c->focus_row, old = c->focus_row;
+  if (n <= 0) return;
+  QTreeWidget *tw = ctw (c);
+  int page = tw && tw->visualItemRect (tw->topLevelItem (0)).height () > 0
+             ? qMax (1, tw->viewport ()->height () / tw->visualItemRect (tw->topLevelItem (0)).height ()) : 10;
+  switch (scroll_type) {
+  case GTK_SCROLL_STEP_BACKWARD: case GTK_SCROLL_STEP_UP: row--; break;
+  case GTK_SCROLL_STEP_FORWARD: case GTK_SCROLL_STEP_DOWN: row++; break;
+  case GTK_SCROLL_PAGE_BACKWARD: case GTK_SCROLL_PAGE_UP: row -= page; break;
+  case GTK_SCROLL_PAGE_FORWARD: case GTK_SCROLL_PAGE_DOWN: row += page; break;
+  case GTK_SCROLL_START: row = 0; break;
+  case GTK_SCROLL_END: row = n - 1; break;
+  default: return;
+  }
+  row = qBound (0, row, n - 1);
+  if (c->selection_mode != GTK_SELECTION_MULTIPLE && c->selection_mode != GTK_SELECTION_EXTENDED) gtk_clist_unselect_all (c);
+  gtk_clist_select_row (c, row, -1);
+  c->focus_row = row;
+  if (gtk_clist_row_is_visible (c, row) != GTK_VISIBILITY_FULL) gtk_clist_moveto (c, row, -1, row > old ? 1.0 : 0.0, 0);
+}
+
 static void gtk_clist_class_init (GtkCListClass *klass)
 {
   G_OBJECT_CLASS (klass)->dispose = clist_dispose;
@@ -381,8 +405,11 @@ static void gtk_clist_class_init (GtkCListClass *klass)
                 G_TYPE_NONE, 1, G_TYPE_INT);
   g_signal_new ("resize-column", t, G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 2, G_TYPE_INT, G_TYPE_INT);
   g_signal_new ("row-move", t, G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 2, G_TYPE_INT, G_TYPE_INT);
+  g_signal_new_class_handler ("scroll-vertical", t, (GSignalFlags) (G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION),
+                              G_CALLBACK (clist_scroll_vertical), nullptr, nullptr, nullptr, G_TYPE_NONE, 2, G_TYPE_INT, G_TYPE_FLOAT);
   klass->select_row = clist_real_select;
   klass->unselect_row = clist_real_unselect;
+  klass->refresh = [] (GtkCList *c) { if (QTreeWidget *tw = ctw (c)) tw->viewport ()->update (); };
 }
 
 static void clist_resort_if_needed (GtkCList *c) { if (cld (c)->auto_sort) gtk_clist_sort (c); }
@@ -1434,6 +1461,28 @@ void gtk_progress_bar_set_activity_blocks (GtkProgressBar *, guint) {}
 /* ======================================================================
  * GtkRuler
  * ====================================================================== */
+/* the default draw_ticks: the ticks are painted with Qt in the paint event */
+static void ruler_default_draw_ticks (GtkRuler *) {}
+
+/* a subclass's draw_ticks draws into backing_store (GTK 2): make it the
+ * widget's size, let the class draw, and return it as an image */
+static QImage ruler_backing_image (GtkRuler *r, QWidget *qw)
+{
+  int w = qMax (1, qw->width ()), h = qMax (1, qw->height ());
+  int bw = 0, bh = 0;
+  if (r->backing_store) gdk_drawable_get_size (r->backing_store, &bw, &bh);
+  if (!r->backing_store || bw != w || bh != h) {
+    if (r->backing_store) g_object_unref (r->backing_store);
+    r->backing_store = gdk_pixmap_new (GTK_WIDGET (r)->window, w, h, -1);
+  }
+  GTK_RULER_GET_CLASS (r)->draw_ticks (r);
+  cairo_surface_t *s = gtkqt_drawable_target (r->backing_store);
+  if (!s) return QImage ();
+  cairo_surface_flush (s);
+  return QImage (cairo_image_surface_get_data (s), cairo_image_surface_get_width (s), cairo_image_surface_get_height (s),
+                 cairo_image_surface_get_stride (s), QImage::Format_RGB32).copy ();
+}
+
 class GtkQtRuler : public QWidget {
 public:
   bool vertical = false;
@@ -1446,6 +1495,15 @@ protected:
     if (!w) return;
     auto *r = GTK_RULER (w);
     QPainter p (this);
+    GtkRulerClass *klass = GTK_RULER_GET_CLASS (r);
+    if (klass->draw_ticks && klass->draw_ticks != ruler_default_draw_ticks) {
+      /* a subclass draws its own ticks (GTK 2's backing store), then its
+       * position marker on the window */
+      p.drawImage (0, 0, ruler_backing_image (r, this));
+      p.end ();
+      if (klass->draw_pos) klass->draw_pos (r);
+      return;
+    }
     p.fillRect (rect (), palette ().color (QPalette::Window));
     p.setPen (palette ().color (QPalette::WindowText));
     int len = vertical ? height () : width (), thick = vertical ? width () : height ();
@@ -1498,11 +1556,27 @@ static QObject *hruler_create (GtkWidget *) { return new GtkQtRuler; }
 static QObject *vruler_create (GtkWidget *) { auto *r = new GtkQtRuler; r->vertical = true; return r; }
 
 G_DEFINE_TYPE (GtkRuler, gtk_ruler, GTK_TYPE_WIDGET)
-static void gtk_ruler_init (GtkRuler *r) { r->upper = 100; r->max_size = 100; }
-static void gtk_ruler_class_init (GtkRulerClass *klass) { GTK_WIDGET_CLASS (klass)->motion_notify_event = ruler_motion; }
+static GtkRulerMetric ruler_metrics[] = {
+  { (gchar *) "Pixels", (gchar *) "Pi", 1.0, { 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000 }, { 1, 5, 10, 50, 100 } },
+  { (gchar *) "Inches", (gchar *) "In", 72.0, { 1, 2, 4, 8, 16, 32, 64, 128, 256, 512 }, { 1, 2, 4, 8, 16 } },
+  { (gchar *) "Centimeters", (gchar *) "Cn", 28.35, { 1, 2, 5, 10, 25, 50, 100, 250, 500, 1000 }, { 1, 5, 10, 50, 100 } },
+};
+static void gtk_ruler_init (GtkRuler *r) { r->upper = 100; r->max_size = 100; r->metric = &ruler_metrics[GTK_PIXELS]; }
+static void ruler_finalize (GObject *o)
+{
+  auto *r = GTK_RULER (o);
+  if (r->backing_store) g_object_unref (r->backing_store);
+  r->backing_store = nullptr;
+  G_OBJECT_CLASS (gtk_ruler_parent_class)->finalize (o);
+}
+static void gtk_ruler_class_init (GtkRulerClass *klass)
+{
+  GTK_WIDGET_CLASS (klass)->motion_notify_event = ruler_motion;
+  G_OBJECT_CLASS (klass)->finalize = ruler_finalize;
+  klass->draw_ticks = ruler_default_draw_ticks;
+  klass->draw_pos = nullptr;
+}
 
-typedef GtkRuler GtkHRuler, GtkVRuler;
-typedef GtkRulerClass GtkHRulerClass, GtkVRulerClass;
 G_DEFINE_TYPE (GtkHRuler, gtk_hruler, GTK_TYPE_RULER)
 static void gtk_hruler_init (GtkHRuler *) {}
 static void gtk_hruler_class_init (GtkHRulerClass *klass) { gtkqt_set_create (GTK_WIDGET_CLASS (klass), hruler_create); }
@@ -1513,7 +1587,27 @@ static void gtk_vruler_class_init (GtkVRulerClass *klass) { gtkqt_set_create (GT
 extern "C" {
 GtkWidget *gtk_hruler_new (void) { return (GtkWidget *) g_object_new (gtk_hruler_get_type (), nullptr); }
 GtkWidget *gtk_vruler_new (void) { return (GtkWidget *) g_object_new (gtk_vruler_get_type (), nullptr); }
-void gtk_ruler_set_metric (GtkRuler *r, GtkMetricType m) { r->metric = m; gtk_widget_queue_draw (GTK_WIDGET (r)); }
+void gtk_ruler_set_metric (GtkRuler *r, GtkMetricType m)
+{
+  if (m < GTK_PIXELS || m > GTK_CENTIMETERS) return;
+  r->metric = &ruler_metrics[m];
+  gtk_widget_queue_draw (GTK_WIDGET (r));
+}
+GtkMetricType gtk_ruler_get_metric (GtkRuler *r)
+{
+  for (int i = 0; i < 3; i++) if (r->metric == &ruler_metrics[i]) return (GtkMetricType) i;
+  return GTK_PIXELS;
+}
+void gtk_ruler_get_range (GtkRuler *r, gdouble *lower, gdouble *upper, gdouble *position, gdouble *max_size)
+{
+  if (lower) *lower = r->lower;
+  if (upper) *upper = r->upper;
+  if (position) *position = r->position;
+  if (max_size) *max_size = r->max_size;
+}
+/* redraw: the paint event calls the class's draw_ticks and draw_pos */
+void gtk_ruler_draw_ticks (GtkRuler *r) { gtk_widget_queue_draw (GTK_WIDGET (r)); }
+void gtk_ruler_draw_pos (GtkRuler *r) { gtk_widget_queue_draw (GTK_WIDGET (r)); }
 void gtk_ruler_set_range (GtkRuler *r, gdouble lower, gdouble upper, gdouble position, gdouble max_size)
 {
   r->lower = lower; r->upper = upper; r->position = position; r->max_size = max_size;

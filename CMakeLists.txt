@@ -28,6 +28,7 @@ set(GTKQT_SOURCES
     src/dialogs.cpp
     src/application.cpp
     src/drawing.cpp
+    src/pixbuf.cpp
     src/treeview.cpp
     src/builder.cpp
     src/uimanager.cpp
@@ -139,7 +140,7 @@ set_target_properties(gtkqt-x11 PROPERTIES POSITION_INDEPENDENT_CODE ON C_VISIBI
 # configure scripts at them.
 set(GTKQT_INSTALL_LIBDIR ${CMAKE_INSTALL_FULL_LIBDIR}/gtk-made-qt)
 set(GTKQT_INSTALL_INCLUDEDIR ${CMAKE_INSTALL_FULL_INCLUDEDIR}/gtk-made-qt)
-set(GTKQT_LINK_NAMES gtk gdk gtk-x11-2.0 gdk-x11-2.0 gtk-3 gdk-3 gtk-4)
+set(GTKQT_LINK_NAMES gtk gdk gtk-x11-2.0 gdk-x11-2.0 gtk-3 gdk-3 gtk-4 gdk_pixbuf-2.0)
 function(gtkqt_link_script file archive qtlibs)
     file(GENERATE OUTPUT ${file} CONTENT
 "/* GNU ld script: GTK made Qt (the GTK API on Qt). */
@@ -192,7 +193,7 @@ foreach(pc ${GTKQT_PC_FILES})
     set(PC_LIBDIR ${GTKQT_INSTALL_LIBDIR})
     configure_file(pkgconfig/gtk.pc.in ${GTKQT_STAGE}/pkgconfig/${PCNAME}.pc @ONLY)
 endforeach()
-foreach(pcname x11 xext)
+foreach(pcname x11 xext gdk-pixbuf-2.0)
     foreach(variant "" "shared/")
         foreach(where build stage)
             if(where STREQUAL build)
@@ -206,10 +207,18 @@ foreach(pcname x11 xext)
             endif()
             if(pcname STREQUAL x11)
                 set(l X11)
-            else()
+            elseif(pcname STREQUAL xext)
                 set(l Xext)
+            else()
+                set(l gdk_pixbuf-2.0)
             endif()
-            file(WRITE ${out} "Name: ${pcname}\nDescription: Xlib for GTK programs, on GTK made Qt\nVersion: 1.8.7\nCflags: -I${inc}\nLibs: -L${lib} -l${l}\n")
+            if(pcname STREQUAL gdk-pixbuf-2.0)
+                # GdkPixbuf is part of GTK made Qt (any GTK API version: no
+                # GTKQT_API_VERSION here)
+                file(WRITE ${out} "Name: gdk-pixbuf-2.0\nDescription: GdkPixbuf, on GTK made Qt\nVersion: 2.42.10\nRequires: glib-2.0 gobject-2.0 gio-2.0\nCflags: -I${inc}\nLibs: -L${lib} -l${l}\n")
+            else()
+                file(WRITE ${out} "Name: ${pcname}\nDescription: Xlib for GTK programs, on GTK made Qt\nVersion: 1.8.7\nCflags: -I${inc}\nLibs: -L${lib} -l${l}\n")
+            endif()
         endforeach()
     endforeach()
 endforeach()

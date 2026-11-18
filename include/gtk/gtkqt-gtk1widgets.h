@@ -72,7 +72,10 @@ typedef struct {
   void (*select_row) (GtkCList *clist, gint row, gint column, GdkEvent *event);
   void (*unselect_row) (GtkCList *clist, gint row, gint column, GdkEvent *event);
   void (*click_column) (GtkCList *clist, gint column);
+  void (*refresh) (GtkCList *clist);   /* redraw the rows */
 } GtkCListClass;
+#define GTK_CLIST_CLASS(k)     (G_TYPE_CHECK_CLASS_CAST ((k), GTK_TYPE_CLIST, GtkCListClass))
+#define GTK_CLIST_GET_CLASS(o) (G_TYPE_INSTANCE_GET_CLASS ((o), GTK_TYPE_CLIST, GtkCListClass))
 #define GTK_TYPE_CLIST     (gtk_clist_get_type ())
 #define GTK_CLIST(o)       (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_CLIST, GtkCList))
 #define GTK_IS_CLIST(o)    (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_CLIST))
@@ -280,21 +283,59 @@ void       gtk_progress_set_activity_mode (GtkProgress *progress, guint activity
 GtkAdjustment *gtk_progress_get_adjustment_ (GtkProgress *progress);
 
 /* ---------- GtkRuler ---------- */
+/* GTK 2's layout: subclasses (Sylpheed's column ruler) draw their ticks
+ * into backing_store with GDK calls from the class's draw_ticks */
 typedef enum { GTK_PIXELS, GTK_INCHES, GTK_CENTIMETERS } GtkMetricType;
-typedef struct _GtkRuler { GtkWidget parent_instance; gint xsrc, ysrc, slider_size; gdouble lower, upper, position, max_size; GtkMetricType metric; } GtkRuler;
-typedef struct { GtkWidgetClass parent_class; } GtkRulerClass;
+typedef struct _GtkRulerMetric {
+  gchar *metric_name;
+  gchar *abbrev;
+  gdouble pixels_per_unit;
+  gdouble ruler_scale[10];
+  gint subdivide[5];
+} GtkRulerMetric;
+typedef struct _GtkRuler {
+  GtkWidget parent_instance;
+  GdkPixmap *backing_store;
+  GdkGC *non_gr_exp_gc;
+  GtkRulerMetric *metric;
+  gint xsrc, ysrc, slider_size;
+  gdouble lower, upper, position, max_size;
+} GtkRuler;
+typedef struct _GtkRulerClass {
+  GtkWidgetClass parent_class;
+  void (*draw_ticks) (GtkRuler *ruler);
+  void (*draw_pos) (GtkRuler *ruler);
+  void (*_gtk_reserved1) (void);
+  void (*_gtk_reserved2) (void);
+  void (*_gtk_reserved3) (void);
+  void (*_gtk_reserved4) (void);
+} GtkRulerClass;
+typedef struct _GtkHRuler { GtkRuler ruler; } GtkHRuler;
+typedef struct _GtkHRulerClass { GtkRulerClass parent_class; } GtkHRulerClass;
+typedef struct _GtkVRuler { GtkRuler ruler; } GtkVRuler;
+typedef struct _GtkVRulerClass { GtkRulerClass parent_class; } GtkVRulerClass;
 #define GTK_TYPE_RULER  (gtk_ruler_get_type ())
 #define GTK_RULER(o)    (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_RULER, GtkRuler))
+#define GTK_RULER_CLASS(k) (G_TYPE_CHECK_CLASS_CAST ((k), GTK_TYPE_RULER, GtkRulerClass))
+#define GTK_RULER_GET_CLASS(o) (G_TYPE_INSTANCE_GET_CLASS ((o), GTK_TYPE_RULER, GtkRulerClass))
 #define GTK_IS_RULER(o) (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_RULER))
-#define GTK_HRULER(o)   GTK_RULER (o)
-#define GTK_VRULER(o)   GTK_RULER (o)
+#define GTK_TYPE_HRULER (gtk_hruler_get_type ())
+#define GTK_HRULER(o)   (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_HRULER, GtkHRuler))
+#define GTK_IS_HRULER(o) (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_HRULER))
+#define GTK_TYPE_VRULER (gtk_vruler_get_type ())
+#define GTK_VRULER(o)   (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_VRULER, GtkVRuler))
+#define GTK_IS_VRULER(o) (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_VRULER))
 GType      gtk_ruler_get_type (void) G_GNUC_CONST;
 GType      gtk_hruler_get_type (void) G_GNUC_CONST;
 GType      gtk_vruler_get_type (void) G_GNUC_CONST;
 GtkWidget *gtk_hruler_new (void);
 GtkWidget *gtk_vruler_new (void);
 void       gtk_ruler_set_metric (GtkRuler *ruler, GtkMetricType metric);
+GtkMetricType gtk_ruler_get_metric (GtkRuler *ruler);
 void       gtk_ruler_set_range (GtkRuler *ruler, gdouble lower, gdouble upper, gdouble position, gdouble max_size);
+void       gtk_ruler_get_range (GtkRuler *ruler, gdouble *lower, gdouble *upper, gdouble *position, gdouble *max_size);
+void       gtk_ruler_draw_ticks (GtkRuler *ruler);
+void       gtk_ruler_draw_pos (GtkRuler *ruler);
 
 /* ---------- GtkCalendar ---------- */
 typedef enum { GTK_CALENDAR_SHOW_HEADING = 1 << 0, GTK_CALENDAR_SHOW_DAY_NAMES = 1 << 1, GTK_CALENDAR_NO_MONTH_CHANGE = 1 << 2,

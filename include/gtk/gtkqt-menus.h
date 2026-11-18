@@ -9,7 +9,23 @@
 
 G_BEGIN_DECLS
 
-GTKQT_SIMPLE_TYPE (GtkMenuShell, GtkContainer)
+/* GTK 2's public fields: children (the items, in order) is kept current */
+typedef struct _GtkMenuShell {
+  GtkContainer parent_instance;
+  GList *children;
+  GtkWidget *active_menu_item;
+  GtkWidget *parent_menu_shell;
+  guint button;
+  guint32 activate_time;
+  guint active : 1;
+  guint have_grab : 1;
+  guint have_xgrab : 1;
+  guint ignore_leave : 1;
+  guint menu_flag : 1;
+  guint ignore_enter : 1;
+  guint keyboard_mode : 1;
+} GtkMenuShell;
+typedef struct _GtkMenuShellClass { GtkContainerClass parent_class; guint submenu_placement : 1; } GtkMenuShellClass;
 GTKQT_SIMPLE_TYPE (GtkMenuBar, GtkMenuShell)
 GTKQT_SIMPLE_TYPE (GtkMenu, GtkMenuShell)
 #define GTK_TYPE_MENU_SHELL  (gtk_menu_shell_get_type ())
@@ -96,6 +112,7 @@ void       gtk_radio_menu_item_join_group (GtkRadioMenuItem *radio_menu_item, Gt
 GTKQT_SIMPLE_TYPE (GtkSeparatorMenuItem, GtkMenuItem)
 #define GTK_TYPE_SEPARATOR_MENU_ITEM (gtk_separator_menu_item_get_type ())
 GType      gtk_separator_menu_item_get_type (void) G_GNUC_CONST;
+#define GTK_IS_SEPARATOR_MENU_ITEM(o) (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_SEPARATOR_MENU_ITEM))
 GtkWidget *gtk_separator_menu_item_new (void);
 
 GTKQT_SIMPLE_TYPE (GtkImageMenuItem, GtkMenuItem)

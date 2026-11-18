@@ -25,8 +25,23 @@ void  gtk_item_select (GtkItem *item);
 void  gtk_item_deselect (GtkItem *item);
 void  gtk_item_toggle (GtkItem *item);
 
-/* GtkBox (+ GTK 2/3 GtkHBox / GtkVBox) */
-GTKQT_SIMPLE_TYPE (GtkBox, GtkContainer)
+/* GtkBox (+ GTK 2/3 GtkHBox / GtkVBox). GTK 2's public fields are kept
+ * current: children (GtkBoxChild, in packing order), spacing, homogeneous */
+typedef struct _GtkBoxChild {
+  GtkWidget *widget;
+  guint16 padding;
+  guint expand : 1;
+  guint fill : 1;
+  guint pack : 1;
+  guint is_secondary : 1;
+} GtkBoxChild;
+typedef struct _GtkBox {
+  GtkContainer parent_instance;
+  GList *children;
+  gint16 spacing;
+  guint homogeneous : 1;
+} GtkBox;
+typedef struct _GtkBoxClass { GtkContainerClass parent_class; } GtkBoxClass;
 GTKQT_SIMPLE_TYPE (GtkHBox, GtkBox)
 GTKQT_SIMPLE_TYPE (GtkVBox, GtkBox)
 #define GTK_TYPE_BOX    (gtk_box_get_type ())
@@ -97,8 +112,16 @@ void       gtk_grid_set_column_homogeneous (GtkGrid *grid, gboolean homogeneous)
 void       gtk_grid_insert_row (GtkGrid *grid, gint position);
 void       gtk_grid_insert_column (GtkGrid *grid, gint position);
 
-/* GtkTable (GTK 2/3) */
-GTKQT_SIMPLE_TYPE (GtkTable, GtkContainer)
+/* GtkTable (GTK 2/3): the size and spacing fields programs read are kept current */
+typedef struct _GtkTable {
+  GtkContainer parent_instance;
+  guint16 nrows;
+  guint16 ncols;
+  guint16 column_spacing;
+  guint16 row_spacing;
+  guint homogeneous : 1;
+} GtkTable;
+typedef struct _GtkTableClass { GtkContainerClass parent_class; } GtkTableClass;
 #define GTK_TYPE_TABLE (gtk_table_get_type ())
 #define GTK_TABLE(o)   (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_TABLE, GtkTable))
 #define GTK_IS_TABLE(o) (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_TABLE))
@@ -181,7 +204,8 @@ GtkWidget *gtk_paned_get_end_child (GtkPaned *paned);
 void       gtk_paned_set_position (GtkPaned *paned, gint position);
 gint       gtk_paned_get_position (GtkPaned *paned);
 
-/* GtkNotebook */
+/* GtkNotebook; GTK 2's "switch-page" passes a GtkNotebookPage, which programs don't look into */
+typedef struct _GtkNotebookPage GtkNotebookPage;
 typedef struct _GtkNotebook { GtkContainer parent_instance; GtkPositionType tab_pos; guint show_tabs : 1, show_border : 1, scrollable : 1; } GtkNotebook;
 typedef struct _GtkNotebookClass { GtkContainerClass parent_class; } GtkNotebookClass;
 #define GTK_TYPE_NOTEBOOK (gtk_notebook_get_type ())
