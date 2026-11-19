@@ -452,6 +452,11 @@ gboolean gtk_window_is_maximized (GtkWindow *window) { QWidget *qw = gtkqt_qw (G
 void gtk_window_fullscreen (GtkWindow *window) { if (QWidget *qw = gtkqt_qw (GTK_WIDGET (window))) qw->setWindowState (qw->windowState () | Qt::WindowFullScreen); }
 void gtk_window_unfullscreen (GtkWindow *window) { if (QWidget *qw = gtkqt_qw (GTK_WIDGET (window))) qw->setWindowState (qw->windowState () & ~Qt::WindowFullScreen); }
 void gtk_window_iconify (GtkWindow *window) { if (QWidget *qw = gtkqt_qw (GTK_WIDGET (window))) qw->showMinimized (); }
+void gtk_window_deiconify (GtkWindow *window)
+{
+  if (QWidget *qw = gtkqt_qw (GTK_WIDGET (window)))
+    if (qw->windowState () & Qt::WindowMinimized) qw->setWindowState (qw->windowState () & ~Qt::WindowMinimized);
+}
 void gtk_window_minimize (GtkWindow *window) { gtk_window_iconify (window); }
 gboolean gtk_window_is_active (GtkWindow *window) { QWidget *qw = gtkqt_qw (GTK_WIDGET (window)); return qw && qw->isActiveWindow (); }
 void gtk_window_set_focus (GtkWindow *, GtkWidget *focus) { if (focus) gtk_widget_grab_focus (focus); }
@@ -1871,7 +1876,8 @@ void gtk_stack_switcher_set_stack (GtkStackSwitcher *switcher, GtkStack *stack)
 /* ======================================================================
  * GtkScrolledWindow
  * ====================================================================== */
-struct ScrollData { Qt::ScrollBarPolicy h = Qt::ScrollBarAsNeeded, v = Qt::ScrollBarAsNeeded; bool frame = true; };
+struct ScrollData { Qt::ScrollBarPolicy h = Qt::ScrollBarAsNeeded, v = Qt::ScrollBarAsNeeded; bool frame = true;
+                    GtkCornerType placement = GTK_CORNER_TOP_LEFT; };
 
 static ScrollData *scroll_data (GtkWidget *w)
 {
@@ -1904,6 +1910,15 @@ static void scrolled_apply (GtkWidget *sw)
     a->setHorizontalScrollBarPolicy (d->h);
     a->setVerticalScrollBarPolicy (d->v);
     a->setFrameShape (d->frame ? QFrame::StyledPanel : QFrame::NoFrame);
+    /* content in a right corner puts the vertical scroll bar on the left:
+       the area is laid out right to left, its contents and the horizontal
+       bar keep left to right */
+    bool left = d->placement == GTK_CORNER_TOP_RIGHT || d->placement == GTK_CORNER_BOTTOM_RIGHT;
+    a->setLayoutDirection (left ? Qt::RightToLeft : Qt::LeftToRight);
+    a->viewport ()->setLayoutDirection (Qt::LeftToRight);
+    a->horizontalScrollBar ()->setLayoutDirection (Qt::LeftToRight);
+    if (auto *sa = qobject_cast<QScrollArea *> (a))
+      if (sa->widget ()) sa->widget ()->setLayoutDirection (Qt::LeftToRight);
   }
 }
 
@@ -1933,10 +1948,36 @@ static void scrolled_unplace (GtkContainer *c, GtkWidget *child)
   if (cw) { cw->hide (); cw->setParent (nullptr); }
 }
 
+/* the "scroll-child" key binding signal: moves the adjustment by a step
+   or a page, or to an end */
+static gboolean scrolled_scroll_child (GtkScrolledWindow *sw, GtkScrollType scroll, gboolean horizontal)
+{
+  GtkAdjustment *adj = horizontal ? gtk_scrolled_window_get_hadjustment (sw) : gtk_scrolled_window_get_vadjustment (sw);
+  if (!adj) return FALSE;
+  double v = adj->value;
+  switch (scroll) {
+  case GTK_SCROLL_STEP_BACKWARD: case GTK_SCROLL_STEP_UP: case GTK_SCROLL_STEP_LEFT: v -= adj->step_increment; break;
+  case GTK_SCROLL_STEP_FORWARD: case GTK_SCROLL_STEP_DOWN: case GTK_SCROLL_STEP_RIGHT: v += adj->step_increment; break;
+  case GTK_SCROLL_PAGE_BACKWARD: case GTK_SCROLL_PAGE_UP: case GTK_SCROLL_PAGE_LEFT: v -= adj->page_increment; break;
+  case GTK_SCROLL_PAGE_FORWARD: case GTK_SCROLL_PAGE_DOWN: case GTK_SCROLL_PAGE_RIGHT: v += adj->page_increment; break;
+  case GTK_SCROLL_START: v = adj->lower; break;
+  case GTK_SCROLL_END: v = adj->upper; break;
+  default: return FALSE;
+  }
+  gtk_adjustment_set_value (adj, CLAMP (v, adj->lower, adj->upper - adj->page_size));
+  return TRUE;
+}
+
 G_DEFINE_TYPE (GtkScrolledWindow, gtk_scrolled_window, GTK_TYPE_BIN)
 static void gtk_scrolled_window_init (GtkScrolledWindow *) {}
 static void gtk_scrolled_window_class_init (GtkScrolledWindowClass *klass)
 {
+  g_signal_new_class_handler ("scroll-child", G_TYPE_FROM_CLASS (klass), (GSignalFlags) (G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION),
+                              G_CALLBACK (scrolled_scroll_child), nullptr, nullptr, nullptr,
+                              G_TYPE_BOOLEAN, 2, gtk_scroll_type_get_type (), G_TYPE_BOOLEAN);
+  gtkqt_prop (klass, g_param_spec_enum ("window-placement", nullptr, nullptr, gtk_corner_type_get_type (), GTK_CORNER_TOP_LEFT, RW),
+              [] (GObject *o, const GValue *v) { gtk_scrolled_window_set_placement (GTK_SCROLLED_WINDOW (o), (GtkCornerType) g_value_get_enum (v)); },
+              [] (GObject *o, GValue *v) { g_value_set_enum (v, gtk_scrolled_window_get_placement (GTK_SCROLLED_WINDOW (o))); });
   gtkqt_set_create (GTK_WIDGET_CLASS (klass), scrolled_create);
   gtkqt_set_place (GTK_CONTAINER_CLASS (klass), scrolled_place, scrolled_unplace);
   gtkqt_prop (klass, g_param_spec_enum ("hscrollbar-policy", nullptr, nullptr, gtk_policy_type_get_type (), GTK_POLICY_AUTOMATIC, RW),
@@ -2009,6 +2050,27 @@ void gtk_scrolled_window_set_min_content_height (GtkScrolledWindow *sw, gint hei
   if (QWidget *qw = gtkqt_qw (GTK_WIDGET (sw))) qw->setMinimumHeight (qMax (0, height));
 }
 void gtk_scrolled_window_set_propagate_natural_height (GtkScrolledWindow *, gboolean) {}
+
+void gtk_scrolled_window_set_placement (GtkScrolledWindow *sw, GtkCornerType placement)
+{
+  scroll_data (GTK_WIDGET (sw))->placement = placement;
+  scrolled_apply (GTK_WIDGET (sw));
+}
+GtkCornerType gtk_scrolled_window_get_placement (GtkScrolledWindow *sw) { return scroll_data (GTK_WIDGET (sw))->placement; }
+void gtk_scrolled_window_unset_placement (GtkScrolledWindow *sw) { gtk_scrolled_window_set_placement (sw, GTK_CORNER_TOP_LEFT); }
+
+/* the scroll bars are GtkScrollbar widgets on the area's own QScrollBars,
+   sharing the window's adjustments */
+static GtkWidget *scrolled_bar (GtkScrolledWindow *sw, bool vertical)
+{
+  QAbstractScrollArea *a = scrolled_area (GTK_WIDGET (sw));
+  if (!a) return nullptr;
+  QScrollBar *sb = vertical ? a->verticalScrollBar () : a->horizontalScrollBar ();
+  GtkAdjustment *adj = vertical ? gtk_scrolled_window_get_vadjustment (sw) : gtk_scrolled_window_get_hadjustment (sw);
+  return gtkqt_scrollbar_wrap (sb, adj, GTK_WIDGET (sw));
+}
+GtkWidget *gtk_scrolled_window_get_hscrollbar (GtkScrolledWindow *sw) { return scrolled_bar (sw, false); }
+GtkWidget *gtk_scrolled_window_get_vscrollbar (GtkScrolledWindow *sw) { return scrolled_bar (sw, true); }
 }
 
 /* ======================================================================

@@ -110,6 +110,16 @@ static void read_options (GdkPixbuf *p, QImageReader &reader)
   if (o != 1) p->options->insert ("orientation", QByteArray::number (o));
 }
 
+/* new pixels for an existing pixbuf, in its own memory: a pixbuf made with
+   gdk_pixbuf_new_from_data shows the caller's buffer (GnomeCanvas renders
+   into its canvas buffer that way), so replacing the QImage would lose them */
+static void store_pixels (QImage *d, const QImage &src)
+{
+  QImage c = src.convertToFormat (d->format ());
+  int n = qMin (c.bytesPerLine (), d->bytesPerLine ());
+  for (int y = 0; y < qMin (c.height (), d->height ()); y++) memcpy (d->scanLine (y), c.constScanLine (y), n);
+}
+
 static QImage::Format format_for (gboolean has_alpha) { return has_alpha ? QImage::Format_RGBA8888 : QImage::Format_RGB888; }
 
 static const char *qt_type (const char *type)
@@ -354,7 +364,7 @@ void gdk_pixbuf_saturate_and_pixelate (const GdkPixbuf *src, GdkPixbuf *dest, gf
       }
     }
   }
-  *d = out;
+  store_pixels (d, out);
 }
 
 GdkPixbuf *gdk_pixbuf_scale_simple (const GdkPixbuf *src, int width, int height, GdkInterpType interp)
@@ -383,7 +393,7 @@ static void draw_scaled (const GdkPixbuf *src, GdkPixbuf *dest, int dx, int dy, 
     p.scale (sx, sy);
     p.drawImage (0, 0, *s);
   }
-  *d = target.convertToFormat (d->format ());
+  store_pixels (d, target);
 }
 
 void gdk_pixbuf_scale (const GdkPixbuf *src, GdkPixbuf *dest, int dx, int dy, int dw, int dh, double ox, double oy,

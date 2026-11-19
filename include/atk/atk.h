@@ -10,6 +10,12 @@
 #ifndef GTKQT_ATK_H
 #define GTKQT_ATK_H
 
+/* Programs that use GTK's gail-util (gail.pc, e.g. libgnomecanvas) get the
+ * real ATK; its functions on objects other than widgets go to libatk */
+#ifdef GTKQT_REAL_ATK
+#include_next <atk/atk.h>
+#else
+
 #include <glib-object.h>
 
 #if !defined (GTKQT_COMPILATION) || defined (GTKQT_EXPORT_API)
@@ -36,5 +42,7 @@ G_END_DECLS
 #ifdef GTKQT_VISIBILITY_PUSHED_ATK
 #pragma GCC visibility pop
 #endif
+
+#endif /* GTKQT_REAL_ATK */
 
 #endif

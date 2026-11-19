@@ -179,6 +179,10 @@ GTKQT_SIMPLE_TYPE (GtkToolItem, GtkBin)
 GTKQT_SIMPLE_TYPE (GtkToolButton, GtkToolItem)
 GTKQT_SIMPLE_TYPE (GtkToggleToolButton, GtkToolButton)
 GTKQT_SIMPLE_TYPE (GtkSeparatorToolItem, GtkToolItem)
+GTKQT_SIMPLE_TYPE (GtkRadioToolButton, GtkToggleToolButton)
+#define GTK_TYPE_RADIO_TOOL_BUTTON (gtk_radio_tool_button_get_type ())
+#define GTK_RADIO_TOOL_BUTTON(o)   (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_RADIO_TOOL_BUTTON, GtkRadioToolButton))
+#define GTK_IS_RADIO_TOOL_BUTTON(o) (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_RADIO_TOOL_BUTTON))
 #define GTK_TYPE_TOOLBAR      (gtk_toolbar_get_type ())
 #define GTK_TOOLBAR(o)        (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_TOOLBAR, GtkToolbar))
 #define GTK_IS_TOOLBAR(o) (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_TOOLBAR))
@@ -197,6 +201,19 @@ GType        gtk_tool_item_get_type (void) G_GNUC_CONST;
 GType        gtk_tool_button_get_type (void) G_GNUC_CONST;
 GType        gtk_toggle_tool_button_get_type (void) G_GNUC_CONST;
 GType        gtk_separator_tool_item_get_type (void) G_GNUC_CONST;
+GType        gtk_radio_tool_button_get_type (void) G_GNUC_CONST;
+GtkToolItem *gtk_radio_tool_button_new (GSList *group);
+GtkToolItem *gtk_radio_tool_button_new_from_stock (GSList *group, const gchar *stock_id);
+GtkToolItem *gtk_radio_tool_button_new_from_widget (GtkRadioToolButton *group);
+GtkToolItem *gtk_radio_tool_button_new_with_stock_from_widget (GtkRadioToolButton *group, const gchar *stock_id);
+GSList      *gtk_radio_tool_button_get_group (GtkRadioToolButton *button);
+void         gtk_radio_tool_button_set_group (GtkRadioToolButton *button, GSList *group);
+void         gtk_tool_button_set_icon_widget (GtkToolButton *button, GtkWidget *icon_widget);
+GtkWidget   *gtk_tool_button_get_icon_widget (GtkToolButton *button);
+void         gtk_tool_item_set_visible_horizontal (GtkToolItem *tool_item, gboolean visible_horizontal);
+void         gtk_tool_item_set_visible_vertical (GtkToolItem *tool_item, gboolean visible_vertical);
+gboolean     gtk_tool_item_get_visible_horizontal (GtkToolItem *tool_item);
+gboolean     gtk_tool_item_get_visible_vertical (GtkToolItem *tool_item);
 GtkWidget   *gtk_toolbar_new (void);
 void         gtk_toolbar_insert (GtkToolbar *toolbar, GtkToolItem *item, gint pos);
 void         gtk_toolbar_set_style (GtkToolbar *toolbar, GtkToolbarStyle style);

@@ -27,11 +27,12 @@ DISPLAY=:46 ./prog-real & sleep 3; DISPLAY=:46 import -window root real.png; con
 - `GTKQT_SCRIPT="..."` - steps separated by `;`:
   `wait <ms>`, `key <keys>` (QKeySequence syntax; accelerators fire),
   `type <text>`, `menu File/Save As...`, `click <widget> [button] [x y]`,
+  `drag <widget> x0 y0 x1 y1 [button]` (press, ten moves, release),
   `focus <widget>`, `file <path>` (accept the file dialog with that file),
   `accept` / `reject` (press the dialog's OK / Cancel response button),
   `shot <png>`, `dump` (widget tree), `quit`. Widgets are found by name
   (`gtk_widget_set_name`), button/label text, or kind (`textview`, `entry`,
-  `treeview`, `window`); `click <tab text>` also switches notebook pages.
+  `treeview`, `layout` - a GtkLayout such as GnomeCanvas, `window`); `click <tab text>` also switches notebook pages.
   `type` delivers all its keys at once; programs with timers between key
   presses (Galculator) need `type 1; wait 150; type 2 ...`.
 
@@ -86,6 +87,27 @@ browser and `file /path/song.wav` chooses a file and presses Play, after
 which the disk writer's output must have the file's full length. For the
 docked windows as a window manager-less X server shows them, run under
 Xvfb with `QT_QPA_PLATFORM=xcb` and `import -window root`.
+
+## Xournal 0.4.8 (GTK 2, on libgnomecanvas)
+
+libgnomecanvas 2.30.3 is built first, static, into a scratch prefix (it
+needs libart, and ATK for its accessibility code, which links libgailutil):
+
+```bash
+gtk-made-qt-env sh -c './configure --prefix=/tmp/xo-prefix --disable-shared --enable-static && make && make install'
+```
+
+then Xournal against it (`PKG_CONFIG="pkg-config --static"`,
+`PKG_CONFIG_PATH=/tmp/xo-prefix/lib/pkgconfig`, poppler-glib from the
+system). The canvas is found by kind (`layout`), strokes are drawn with
+`drag`:
+
+```bash
+GTKQT_SCRIPT="wait 1500; drag layout 200 250 600 400; click Red; click Text; click layout 1 400 450; type Note; click Select Rectangle; drag layout 150 120 650 520; key Ctrl+C; key Ctrl+V; menu File/Export to PDF; file /tmp/x.pdf; wait 800; quit" ./xournal doc.pdf
+```
+
+The reference is Ubuntu's own `xournal` under Xvfb, driven with `xdotool`
+(click the tool button, click on the page, `xdotool type`).
 
 ## Memory
 

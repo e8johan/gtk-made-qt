@@ -139,6 +139,42 @@ void       gtk_table_set_row_spacing (GtkTable *table, guint row, guint spacing)
 void       gtk_table_set_col_spacing (GtkTable *table, guint column, guint spacing);
 void       gtk_table_set_homogeneous (GtkTable *table, gboolean homogeneous);
 
+/* GtkLayout (GTK 2/3): a scrollable area; bin_window is the whole layout
+ * (programs draw on it in layout coordinates), children are put at x, y */
+typedef struct _GtkLayoutChild { GtkWidget *widget; gint x, y; } GtkLayoutChild;
+typedef struct _GtkLayout {
+  GtkContainer container;
+  GList *children;              /* GtkLayoutChild */
+  guint width, height;
+  GtkAdjustment *hadjustment, *vadjustment;
+  GdkWindow *bin_window;
+  GdkVisibilityState visibility;
+  gint scroll_x, scroll_y;
+  guint freeze_count;
+} GtkLayout;
+typedef struct _GtkLayoutClass {
+  GtkContainerClass parent_class;
+  void (*set_scroll_adjustments) (GtkLayout *layout, GtkAdjustment *hadjustment, GtkAdjustment *vadjustment);
+} GtkLayoutClass;
+#define GTK_TYPE_LAYOUT            (gtk_layout_get_type ())
+#define GTK_LAYOUT(o)              (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_LAYOUT, GtkLayout))
+#define GTK_LAYOUT_CLASS(k)        (G_TYPE_CHECK_CLASS_CAST ((k), GTK_TYPE_LAYOUT, GtkLayoutClass))
+#define GTK_IS_LAYOUT(o)           (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_LAYOUT))
+#define GTK_LAYOUT_GET_CLASS(o)    (G_TYPE_INSTANCE_GET_CLASS ((o), GTK_TYPE_LAYOUT, GtkLayoutClass))
+GType          gtk_layout_get_type (void) G_GNUC_CONST;
+GtkWidget     *gtk_layout_new (GtkAdjustment *hadjustment, GtkAdjustment *vadjustment);
+GdkWindow     *gtk_layout_get_bin_window (GtkLayout *layout);
+void           gtk_layout_put (GtkLayout *layout, GtkWidget *child_widget, gint x, gint y);
+void           gtk_layout_move (GtkLayout *layout, GtkWidget *child_widget, gint x, gint y);
+void           gtk_layout_set_size (GtkLayout *layout, guint width, guint height);
+void           gtk_layout_get_size (GtkLayout *layout, guint *width, guint *height);
+GtkAdjustment *gtk_layout_get_hadjustment (GtkLayout *layout);
+GtkAdjustment *gtk_layout_get_vadjustment (GtkLayout *layout);
+void           gtk_layout_set_hadjustment (GtkLayout *layout, GtkAdjustment *adjustment);
+void           gtk_layout_set_vadjustment (GtkLayout *layout, GtkAdjustment *adjustment);
+void           gtk_layout_freeze (GtkLayout *layout);
+void           gtk_layout_thaw (GtkLayout *layout);
+
 /* GtkFixed */
 GTKQT_SIMPLE_TYPE (GtkFixed, GtkContainer)
 #define GTK_TYPE_FIXED (gtk_fixed_get_type ())
@@ -281,6 +317,16 @@ GtkWidget *gtk_scrolled_window_get_child (GtkScrolledWindow *scrolled_window);
 void       gtk_scrolled_window_set_min_content_width (GtkScrolledWindow *scrolled_window, gint width);
 void       gtk_scrolled_window_set_min_content_height (GtkScrolledWindow *scrolled_window, gint height);
 void       gtk_scrolled_window_set_propagate_natural_height (GtkScrolledWindow *scrolled_window, gboolean propagate);
+typedef enum { GTK_CORNER_TOP_LEFT, GTK_CORNER_BOTTOM_LEFT, GTK_CORNER_TOP_RIGHT, GTK_CORNER_BOTTOM_RIGHT } GtkCornerType;
+GType      gtk_corner_type_get_type (void) G_GNUC_CONST;
+#define GTK_TYPE_CORNER_TYPE (gtk_corner_type_get_type ())
+/* the corner the contents sit in: a right corner puts the vertical scroll
+   bar on the left (the horizontal one stays at the bottom) */
+void       gtk_scrolled_window_set_placement (GtkScrolledWindow *scrolled_window, GtkCornerType window_placement);
+GtkCornerType gtk_scrolled_window_get_placement (GtkScrolledWindow *scrolled_window);
+void       gtk_scrolled_window_unset_placement (GtkScrolledWindow *scrolled_window);
+GtkWidget *gtk_scrolled_window_get_hscrollbar (GtkScrolledWindow *scrolled_window);
+GtkWidget *gtk_scrolled_window_get_vscrollbar (GtkScrolledWindow *scrolled_window);
 GtkWidget *gtk_viewport_new (GtkAdjustment *hadjustment, GtkAdjustment *vadjustment);
 
 /* GtkExpander */

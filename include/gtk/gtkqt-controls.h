@@ -76,6 +76,8 @@ void         gtk_button_set_icon_name (GtkButton *button, const gchar *icon_name
 void         gtk_button_set_image (GtkButton *button, GtkWidget *image);
 void         gtk_button_set_always_show_image (GtkButton *button, gboolean always_show);
 void         gtk_button_set_relief (GtkButton *button, GtkReliefStyle relief);
+void         gtk_button_set_focus_on_click (GtkButton *button, gboolean focus_on_click);
+gboolean     gtk_button_get_focus_on_click (GtkButton *button);
 void         gtk_button_set_has_frame (GtkButton *button, gboolean has_frame);
 void         gtk_button_set_child (GtkButton *button, GtkWidget *child);
 GtkWidget   *gtk_button_get_child (GtkButton *button);
@@ -269,6 +271,8 @@ void       gtk_combo_box_text_remove (GtkComboBoxText *combo_box, gint position)
 void       gtk_combo_box_text_remove_all (GtkComboBoxText *combo_box);
 gchar     *gtk_combo_box_text_get_active_text (GtkComboBoxText *combo_box);
 void       gtk_combo_box_set_active (GtkComboBox *combo_box, gint index_);
+void       gtk_combo_box_set_focus_on_click (GtkComboBox *combo, gboolean focus_on_click);
+gboolean   gtk_combo_box_get_focus_on_click (GtkComboBox *combo);
 gint       gtk_combo_box_get_active (GtkComboBox *combo_box);
 const gchar *gtk_combo_box_get_active_id (GtkComboBox *combo_box);
 gboolean   gtk_combo_box_set_active_id (GtkComboBox *combo_box, const gchar *active_id);

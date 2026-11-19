@@ -29,6 +29,9 @@ set(GTKQT_SOURCES
     src/application.cpp
     src/drawing.cpp
     src/pixbuf.cpp
+    src/layout.cpp
+    src/textlayout.cpp
+    src/devices.cpp
     src/treeview.cpp
     src/builder.cpp
     src/uimanager.cpp
@@ -222,6 +225,33 @@ foreach(pcname x11 xext gdk-pixbuf-2.0)
         endforeach()
     endforeach()
 endforeach()
+
+# GTK 2's gail-util (pkg-config gail), for programs and libraries that make
+# accessible objects themselves (libgnomecanvas): built on the real ATK when
+# it is there; only those programs depend on libatk
+pkg_check_modules(ATK IMPORTED_TARGET atk)
+if(ATK_FOUND)
+    add_library(gailutil STATIC src/gailutil.c)
+    target_include_directories(gailutil PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_compile_definitions(gailutil PRIVATE GTKQT_API_VERSION=2 GTKQT_REAL_ATK)
+    target_link_libraries(gailutil PRIVATE PkgConfig::ATK PkgConfig::GLIB PkgConfig::CAIRO)
+    set_target_properties(gailutil PROPERTIES POSITION_INDEPENDENT_CODE ON ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/lib)
+    install(TARGETS gailutil ARCHIVE DESTINATION ${GTKQT_INSTALL_LIBDIR})
+    foreach(variant "" "shared/")
+        foreach(where build stage)
+            if(where STREQUAL build)
+                set(inc ${CMAKE_CURRENT_SOURCE_DIR}/include)
+                set(lib ${CMAKE_CURRENT_BINARY_DIR}/lib)
+                set(out ${CMAKE_CURRENT_BINARY_DIR}/lib/${variant}pkgconfig/gail.pc)
+            else()
+                set(inc ${GTKQT_INSTALL_INCLUDEDIR})
+                set(lib ${GTKQT_INSTALL_LIBDIR})
+                set(out ${GTKQT_STAGE}/${variant}pkgconfig/gail.pc)
+            endif()
+            file(WRITE ${out} "Name: gail\nDescription: GTK's gail-util, on GTK made Qt (with the real ATK)\nVersion: 2.24.33\nRequires: atk\nCflags: -I${inc} -DGTKQT_REAL_ATK\nLibs: -L${lib} -lgailutil\n")
+        endforeach()
+    endforeach()
+endif()
 
 # compatibility: build/pkgconfig as before
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/pkgconfig)

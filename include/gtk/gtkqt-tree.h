@@ -426,6 +426,8 @@ void             gtk_tree_selection_unselect_range (GtkTreeSelection *selection,
 
 /* GtkTreeRowReference: follows its row through inserts, deletes and sorting */
 GtkTreeRowReference *gtk_tree_row_reference_new (GtkTreeModel *model, GtkTreePath *path);
+GType      gtk_tree_row_reference_get_type (void) G_GNUC_CONST;
+#define GTK_TYPE_TREE_ROW_REFERENCE (gtk_tree_row_reference_get_type ())
 GtkTreeRowReference *gtk_tree_row_reference_copy (GtkTreeRowReference *reference);
 void                 gtk_tree_row_reference_free (GtkTreeRowReference *reference);
 GtkTreePath         *gtk_tree_row_reference_get_path (GtkTreeRowReference *reference);

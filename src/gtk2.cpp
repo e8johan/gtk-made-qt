@@ -46,6 +46,8 @@ cairo_surface_t *gtkqt_drawable_target (GdkDrawable *d)
 {
   if (!d) return nullptr;
   if (d->surface) return d->surface;
+  if (d->kind == GTKQT_DRAWABLE_WINDOW && d->qw)
+    if (auto *b = dynamic_cast<GtkQtBackedWindow *> (d->qw)) return b->gdk_surface ();
   if (d->kind == GTKQT_DRAWABLE_WINDOW && d->widget && d->widget->priv && !d->widget->priv->destroyed) {
     if (d->widget->priv->paint_surface) return d->widget->priv->paint_surface;
     return gtkqt_canvas_surface (d->widget);   /* drawing outside expose: backing store */
@@ -86,7 +88,7 @@ void gdk_drawable_get_size (GdkDrawable *d, gint *width, gint *height)
 {
   int w = 0, h = 0;
   if (d) {
-    if (d->kind == GTKQT_DRAWABLE_PIXMAP) { w = d->width; h = d->height; }
+    if (d->kind == GTKQT_DRAWABLE_PIXMAP || (d->qw && d->width > 0)) { w = d->width; h = d->height; }
     else if (d->qw) { w = d->qw->width (); h = d->qw->height (); }
     else if (d->kind == GTKQT_DRAWABLE_ROOT) { w = gdk_screen_width (); h = gdk_screen_height (); }
     else if (d->widget) {
@@ -118,7 +120,7 @@ void gdk_window_get_position (GdkWindow *window, gint *x, gint *y) { gdk_window_
 gint gdk_window_get_origin (GdkWindow *window, gint *x, gint *y)
 {
   QWidget *qw = window ? (window->qw ? window->qw : (window->widget ? gtkqt_qw (window->widget) : nullptr)) : nullptr;
-  QPoint p = qw ? qw->mapToGlobal (QPoint (0, 0)) : QPoint ();
+  QPoint p = qw ? qw->mapToGlobal (QPoint (window->origin_x, window->origin_y)) : QPoint ();
   if (x) *x = p.x ();
   if (y) *y = p.y ();
   return qw != nullptr;
@@ -128,6 +130,7 @@ GdkWindow *gdk_window_get_pointer (GdkWindow *window, gint *x, gint *y, GdkModif
 {
   QWidget *qw = window ? (window->qw ? window->qw : (window->widget ? gtkqt_qw (window->widget) : nullptr)) : nullptr;
   QPoint p = qw ? qw->mapFromGlobal (QCursor::pos ()) : QCursor::pos ();
+  if (qw && window) p -= QPoint (window->origin_x, window->origin_y);
   if (x) *x = p.x ();
   if (y) *y = p.y ();
   if (mask) *mask = (GdkModifierType) gtkqt_qt_mods_to_gdk (QGuiApplication::queryKeyboardModifiers (), QGuiApplication::mouseButtons ());
@@ -190,6 +193,53 @@ void gdk_window_set_back_pixmap (GdkWindow *window, GdkPixmap *pixmap, gboolean)
 void gdk_window_process_updates (GdkWindow *window, gboolean) { if (QWidget *qw = drawable_qwidget (window)) qw->repaint (); }
 void gdk_window_process_all_updates (void) { QCoreApplication::processEvents (QEventLoop::ExcludeUserInputEvents); }
 void gdk_window_raise (GdkWindow *window) { if (QWidget *qw = drawable_qwidget (window)) qw->window ()->raise (); }
+GdkPixbuf *gdk_pixbuf_get_from_surface (cairo_surface_t *surface, gint src_x, gint src_y, gint width, gint height)
+{
+  if (!surface || width <= 0 || height <= 0) return nullptr;
+  /* paint through cairo so any surface type (and bitmaps, A8) comes out as ARGB */
+  cairo_surface_t *dst = cairo_image_surface_create (CAIRO_FORMAT_ARGB32, width, height);
+  cairo_t *cr = cairo_create (dst);
+  if (cairo_surface_get_type (surface) == CAIRO_SURFACE_TYPE_IMAGE
+      && cairo_image_surface_get_format (surface) == CAIRO_FORMAT_A8) {
+    /* a bitmap: set bits black on white, as X draws a depth 1 pixmap */
+    cairo_set_source_rgb (cr, 1, 1, 1);
+    cairo_paint (cr);
+    cairo_set_source_rgb (cr, 0, 0, 0);
+    cairo_mask_surface (cr, surface, -src_x, -src_y);
+  } else {
+    cairo_set_operator (cr, CAIRO_OPERATOR_SOURCE);
+    cairo_set_source_surface (cr, surface, -src_x, -src_y);
+    cairo_paint (cr);
+  }
+  cairo_destroy (cr);
+  QImage img = gtkqt_surface_image (dst);
+  cairo_surface_destroy (dst);
+  /* RGB24 sources have no alpha: keep the pixbuf opaque, as GDK does */
+  bool opaque = cairo_surface_get_content (surface) == CAIRO_CONTENT_COLOR;
+  if (opaque) img = img.convertToFormat (QImage::Format_RGB32);
+  return gtkqt_pixbuf_from_image (img);
+}
+
+GdkPixbuf *gdk_pixbuf_get_from_drawable (GdkPixbuf *dest, GdkDrawable *src, GdkColormap *, int src_x, int src_y,
+                                         int dest_x, int dest_y, int width, int height)
+{
+  cairo_surface_t *s = gtkqt_drawable_target (src);
+  if (!s) return nullptr;
+  int sw = 0, sh = 0;
+  gdk_drawable_get_size (src, &sw, &sh);
+  if (width < 0) width = sw - src_x;
+  if (height < 0) height = sh - src_y;
+  GdkPixbuf *pb = gdk_pixbuf_get_from_surface (s, src_x, src_y, width, height);
+  if (!pb || !dest) return pb;
+  gdk_pixbuf_copy_area (pb, 0, 0, width, height, dest, dest_x, dest_y);
+  g_object_unref (pb);
+  return dest;
+}
+GdkPixbuf *gdk_pixbuf_get_from_window (GdkWindow *window, gint src_x, gint src_y, gint width, gint height)
+{
+  return gdk_pixbuf_get_from_drawable (nullptr, window, nullptr, src_x, src_y, 0, 0, width, height);
+}
+
 void gdk_window_lower (GdkWindow *window) { if (QWidget *qw = drawable_qwidget (window)) qw->window ()->lower (); }
 
 GdkWindow *gdk_get_default_root_window (void)
@@ -223,6 +273,7 @@ struct _GdkGC {
   GdkGCValues v;
   GdkRectangle clip;
   bool has_clip;
+  QVector<QRect> clip_rects;   /* gdk_gc_set_clip_region: the region's rectangles */
   QVector<double> dashes;
   double dash_offset;
 };
@@ -231,6 +282,7 @@ G_DEFINE_TYPE (GdkGC, gdk_gc, G_TYPE_OBJECT)
 static void gdk_gc_init (GdkGC *gc)
 {
   new (&gc->dashes) QVector<double> ();
+  new (&gc->clip_rects) QVector<QRect> ();
   gc->v.function = GDK_COPY;
   gc->v.line_width = 0;
   gc->v.cap_style = GDK_CAP_BUTT;
@@ -243,6 +295,7 @@ static void gc_finalize (GObject *o)
 {
   auto *gc = (GdkGC *) o;
   gc->dashes.~QVector<double> ();
+  gc->clip_rects.~QVector<QRect> ();
   if (gc->v.tile) g_object_unref (gc->v.tile);
   if (gc->v.stipple) g_object_unref (gc->v.stipple);
   if (gc->v.clip_mask) g_object_unref (gc->v.clip_mask);
@@ -306,6 +359,7 @@ void gdk_gc_set_clip_rectangle (GdkGC *gc, const GdkRectangle *r)
 {
   if (!gc) return;
   gc->has_clip = r != nullptr;
+  gc->clip_rects.clear ();
   if (r) gc->clip = *r;
 }
 void gdk_gc_set_subwindow (GdkGC *gc, GdkSubwindowMode mode) { if (gc) gc->v.subwindow_mode = mode; }
@@ -331,6 +385,7 @@ void gdk_gc_copy (GdkGC *dst, GdkGC *src)
   gdk_gc_set_values (dst, &src->v, (GdkGCValuesMask) 0x3ffff);
   dst->clip = src->clip;
   dst->has_clip = src->has_clip;
+  dst->clip_rects = src->clip_rects;
   dst->dashes = src->dashes;
   dst->dash_offset = src->dash_offset;
 }
@@ -348,7 +403,10 @@ static cairo_t *gc_cairo (GdkDrawable *d, GdkGC *gc, bool for_lines)
   cairo_t *cr = cairo_create (target);
   if (!gc) return cr;
   if (gc->has_clip) {
-    cairo_rectangle (cr, gc->clip.x + gc->v.clip_x_origin, gc->clip.y + gc->v.clip_y_origin, gc->clip.width, gc->clip.height);
+    if (gc->clip_rects.isEmpty ())
+      cairo_rectangle (cr, gc->clip.x + gc->v.clip_x_origin, gc->clip.y + gc->v.clip_y_origin, gc->clip.width, gc->clip.height);
+    for (const QRect &r : gc->clip_rects)
+      cairo_rectangle (cr, r.x () + gc->v.clip_x_origin, r.y () + gc->v.clip_y_origin, r.width (), r.height ());
     cairo_clip (cr);
   }
   const GdkColor &c = gc->v.foreground;
@@ -389,17 +447,32 @@ static double lo (GdkGC *gc) { int w = gc && gc->v.line_width > 0 ? gc->v.line_w
 extern "C" {
 
 /* GTK 1/2's reference counting, destruction, timeouts and idles as
- * functions: programs pass them as callbacks (see gtkqt-compat.h) */
+ * functions: programs pass them as callbacks (see gtkqt-compat.h). The
+ * library is compiled at API 3, where gtk.h does not declare them, so the
+ * shared build exports them here */
+#ifdef GTKQT_EXPORT_API
+#pragma GCC visibility push(default)
+#endif
 GtkWidget *gtk_widget_ref (GtkWidget *widget) { return widget ? (GtkWidget *) g_object_ref (widget) : nullptr; }
 void gtk_widget_unref (GtkWidget *widget) { if (widget) g_object_unref (widget); }
 gpointer gtk_object_ref (gpointer object) { return object ? g_object_ref (object) : nullptr; }
 void gtk_object_unref (gpointer object) { if (object) g_object_unref (object); }
 void gtk_object_sink (gpointer object) { if (object) { g_object_ref_sink (object); g_object_unref (object); } }
-void gtk_object_destroy (gpointer object) { if (object && GTK_IS_WIDGET (object)) gtk_widget_destroy (GTK_WIDGET (object)); }
+/* widgets as GTK destroys them; other objects (canvas items) are disposed,
+ * which emits their "destroy" */
+void gtk_object_destroy (gpointer object)
+{
+  if (!object) return;
+  if (GTK_IS_WIDGET (object)) gtk_widget_destroy (GTK_WIDGET (object));
+  else if (G_IS_OBJECT (object)) g_object_run_dispose (G_OBJECT (object));
+}
 guint gtk_timeout_add (guint32 interval, GSourceFunc function, gpointer data) { return g_timeout_add (interval, function, data); }
 void gtk_timeout_remove (guint id) { g_source_remove (id); }
 guint gtk_idle_add (GSourceFunc function, gpointer data) { return g_idle_add (function, data); }
 void gtk_idle_remove (guint id) { g_source_remove (id); }
+#ifdef GTKQT_EXPORT_API
+#pragma GCC visibility pop
+#endif
 
 } /* extern "C" */
 
@@ -1342,6 +1415,330 @@ void gtk_clipboard_clear (GtkClipboard *c) { QGuiApplication::clipboard ()->clea
 void gtk_clipboard_store (GtkClipboard *) {}
 void gtk_clipboard_set_can_store (GtkClipboard *, gconstpointer, gint) {}
 
+} /* extern "C" */
+
+/* GTK selection targets and Qt MIME types: the text targets are Qt's
+   text/plain, image types keep their MIME name, anything else (a program's
+   own atom) is used as the format name as it is */
+static bool target_is_text (const QByteArray &t)
+{
+  return t == "UTF8_STRING" || t == "STRING" || t == "TEXT" || t == "COMPOUND_TEXT" || t.startsWith ("text/plain");
+}
+static QByteArray atom_bytes (GdkAtom a)
+{
+  gchar *n = gdk_atom_name (a);
+  QByteArray b (n ? n : "");
+  g_free (n);
+  return b;
+}
+static QString target_mime (const QByteArray &t) { return target_is_text (t) ? QStringLiteral ("text/plain") : QString::fromUtf8 (t); }
+
+/* the program's clipboard contents, produced on request by its get_func */
+class GtkQtClipData : public QMimeData {
+public:
+  GtkClipboard *clip;
+  QList<QPair<QByteArray, guint>> targets;   /* target, info */
+  GtkClipboardGetFunc get;
+  GtkClipboardClearFunc clear;
+  gpointer data;
+  bool owner;   /* data is a GObject we hold a weak pointer on */
+
+  ~GtkQtClipData () override
+  {
+    if (clear && !QCoreApplication::closingDown () && (!owner || data)) clear (clip, data);
+    if (owner && data) g_object_remove_weak_pointer ((GObject *) data, &data);
+  }
+  QByteArray fetch (const QByteArray &target, guint info, GdkAtom *type = nullptr) const
+  {
+    if (!get || (owner && !data)) return QByteArray ();
+    GtkSelectionData sel = {};
+    sel.selection = clip->mode == QClipboard::Selection ? GDK_SELECTION_PRIMARY : GDK_SELECTION_CLIPBOARD;
+    sel.target = gdk_atom_intern (target.constData (), FALSE);
+    sel.length = -1;
+    get (clip, &sel, info, data);
+    QByteArray b = sel.length >= 0 && sel.data ? QByteArray ((const char *) sel.data, sel.length) : QByteArray ();
+    if (type) *type = sel.type;
+    g_free (sel.data);
+    return b;
+  }
+  const QPair<QByteArray, guint> *find (const QString &mime) const
+  {
+    for (const auto &t : targets) if (target_mime (t.first) == mime) return &t;
+    return nullptr;
+  }
+  const QPair<QByteArray, guint> *image_target () const
+  {
+    for (const auto &t : targets) if (t.first.startsWith ("image/")) return &t;
+    return nullptr;
+  }
+  QStringList formats () const override
+  {
+    QStringList f;
+    for (const auto &t : targets) if (!f.contains (target_mime (t.first))) f << target_mime (t.first);
+    if (image_target ()) f << QStringLiteral ("application/x-qt-image");
+    return f;
+  }
+  bool hasFormat (const QString &mime) const override { return formats ().contains (mime); }
+protected:
+  QVariant retrieveData (const QString &mime, QMetaType type) const override
+  {
+    if (mime == QLatin1String ("application/x-qt-image")) {
+      const auto *t = image_target ();
+      return t ? QVariant (QImage::fromData (fetch (t->first, t->second))) : QVariant ();
+    }
+    const auto *t = find (mime);
+    if (!t) return QVariant ();
+    QByteArray b = fetch (t->first, t->second);
+    if (mime == QLatin1String ("text/plain") && type.id () == QMetaType::QString) return QString::fromUtf8 (b);
+    return b;
+  }
+};
+
+static gboolean clipboard_set (GtkClipboard *c, const GtkTargetEntry *targets, guint n, GtkClipboardGetFunc get,
+                               GtkClipboardClearFunc clear, gpointer data, bool owner)
+{
+  if (!c || !get) return FALSE;
+  auto *m = new GtkQtClipData;
+  m->clip = c;
+  m->get = get;
+  m->clear = clear;
+  m->data = data;
+  m->owner = owner;
+  if (owner && data) g_object_add_weak_pointer ((GObject *) data, &m->data);
+  for (guint i = 0; i < n; i++) if (targets[i].target) m->targets << qMakePair (QByteArray (targets[i].target), targets[i].info);
+  QGuiApplication::clipboard ()->setMimeData (m, clip_mode (c));
+  return TRUE;
+}
+
+/* the bytes of target from whoever owns the clipboard (another program too) */
+static bool clipboard_fetch (GtkClipboard *c, const QByteArray &target, QByteArray *out, GdkAtom *type)
+{
+  const QMimeData *m = QGuiApplication::clipboard ()->mimeData (clip_mode (c));
+  if (!m) return false;
+  *type = gdk_atom_intern (target.constData (), FALSE);
+  if (auto *own = dynamic_cast<const GtkQtClipData *> (m)) {
+    for (const auto &t : own->targets)
+      if (t.first == target) { *out = own->fetch (t.first, t.second, type); return true; }
+    if (!target_is_text (target)) return false;
+  }
+  if (target_is_text (target)) {
+    if (!m->hasText ()) return false;
+    *out = m->text ().toUtf8 ();
+    if (target != "UTF8_STRING" && !target.startsWith ("text/plain")) *type = gdk_atom_intern ("UTF8_STRING", FALSE);
+    return true;
+  }
+  if (target.startsWith ("image/") && !m->hasFormat (QString::fromUtf8 (target)) && m->hasImage ()) {
+    QBuffer buf (out);
+    buf.open (QIODevice::WriteOnly);
+    return qvariant_cast<QImage> (m->imageData ()).save (&buf, target.mid (6).toUpper ().constData ());
+  }
+  if (target == "text/uri-list" && m->hasUrls ()) {
+    for (const QUrl &u : m->urls ()) *out += u.toEncoded () + "\r\n";
+    return true;
+  }
+  if (!m->hasFormat (QString::fromUtf8 (target))) return false;
+  *out = m->data (QString::fromUtf8 (target));
+  return true;
+}
+
+static QList<QByteArray> clipboard_targets (GtkClipboard *c)
+{
+  QList<QByteArray> r;
+  const QMimeData *m = QGuiApplication::clipboard ()->mimeData (clip_mode (c));
+  if (!m) return r;
+  if (auto *own = dynamic_cast<const GtkQtClipData *> (m)) {
+    for (const auto &t : own->targets) r << t.first;
+    return r;
+  }
+  if (m->hasText ()) r << "UTF8_STRING" << "TEXT" << "STRING" << "text/plain;charset=utf-8";
+  if (m->hasImage ()) r << "image/png" << "image/jpeg" << "image/bmp";
+  for (const QString &f : m->formats ()) {
+    QByteArray b = f.toUtf8 ();
+    if (!r.contains (b) && f != QLatin1String ("application/x-qt-image")) r << b;
+  }
+  return r;
+}
+
+extern "C" {
+
+gboolean gtk_clipboard_set_with_data (GtkClipboard *c, const GtkTargetEntry *targets, guint n_targets,
+                                      GtkClipboardGetFunc get_func, GtkClipboardClearFunc clear_func, gpointer user_data)
+{
+  return clipboard_set (c, targets, n_targets, get_func, clear_func, user_data, false);
+}
+gboolean gtk_clipboard_set_with_owner (GtkClipboard *c, const GtkTargetEntry *targets, guint n_targets,
+                                       GtkClipboardGetFunc get_func, GtkClipboardClearFunc clear_func, GObject *owner)
+{
+  return clipboard_set (c, targets, n_targets, get_func, clear_func, owner, true);
+}
+GObject *gtk_clipboard_get_owner (GtkClipboard *c)
+{
+  auto *m = dynamic_cast<const GtkQtClipData *> (QGuiApplication::clipboard ()->mimeData (clip_mode (c)));
+  return m && m->owner ? (GObject *) m->data : nullptr;
+}
+void gtk_clipboard_set_image (GtkClipboard *c, GdkPixbuf *pixbuf)
+{
+  if (pixbuf) QGuiApplication::clipboard ()->setImage (gtkqt_pixbuf_image (pixbuf), clip_mode (c));
+}
+
+GtkSelectionData *gtk_clipboard_wait_for_contents (GtkClipboard *c, GdkAtom target)
+{
+  QByteArray name = atom_bytes (target), bytes;
+  GdkAtom type = GDK_NONE;
+  auto *sel = g_new0 (GtkSelectionData, 1);
+  sel->selection = c && c->mode == QClipboard::Selection ? GDK_SELECTION_PRIMARY : GDK_SELECTION_CLIPBOARD;
+  sel->target = target;
+  sel->length = -1;
+  sel->display = gdk_display_get_default ();
+  if (name == "TARGETS") {
+    QList<QByteArray> ts = clipboard_targets (c);
+    QVector<GdkAtom> atoms;
+    for (const QByteArray &t : ts) atoms << gdk_atom_intern (t.constData (), FALSE);
+    gtk_selection_data_set (sel, gdk_atom_intern ("ATOM", FALSE), 32, (const guchar *) atoms.constData (),
+                            atoms.size () * (int) sizeof (GdkAtom));
+  } else if (clipboard_fetch (c, name, &bytes, &type)) {
+    gtk_selection_data_set (sel, type, 8, (const guchar *) bytes.constData (), bytes.size ());
+  }
+  return sel;   /* GTK returns a selection with length < 0 when there is nothing */
+}
+
+GdkPixbuf *gtk_clipboard_wait_for_image (GtkClipboard *c)
+{
+  const QMimeData *m = QGuiApplication::clipboard ()->mimeData (clip_mode (c));
+  if (!m || !m->hasImage ()) return nullptr;
+  QImage img = qvariant_cast<QImage> (m->imageData ());
+  return img.isNull () ? nullptr : gtkqt_pixbuf_from_image (img);
+}
+gboolean gtk_clipboard_wait_is_image_available (GtkClipboard *c)
+{
+  const QMimeData *m = QGuiApplication::clipboard ()->mimeData (clip_mode (c));
+  return m && m->hasImage ();
+}
+gboolean gtk_clipboard_wait_is_target_available (GtkClipboard *c, GdkAtom target)
+{
+  return clipboard_targets (c).contains (atom_bytes (target));
+}
+gboolean gtk_clipboard_wait_for_targets (GtkClipboard *c, GdkAtom **targets, gint *n_targets)
+{
+  QList<QByteArray> ts = clipboard_targets (c);
+  if (targets) {
+    *targets = ts.isEmpty () ? nullptr : g_new (GdkAtom, ts.size ());
+    for (int i = 0; i < ts.size (); i++) (*targets)[i] = gdk_atom_intern (ts[i].constData (), FALSE);
+  }
+  if (n_targets) *n_targets = ts.size ();
+  return !ts.isEmpty ();
+}
+void gtk_clipboard_request_contents (GtkClipboard *c, GdkAtom target, GtkClipboardReceivedFunc callback, gpointer user_data)
+{
+  GtkSelectionData *sel = gtk_clipboard_wait_for_contents (c, target);
+  if (callback) callback (c, sel, user_data);
+  gtk_selection_data_free (sel);
+}
+void gtk_clipboard_request_image (GtkClipboard *c, GtkClipboardImageReceivedFunc callback, gpointer user_data)
+{
+  GdkPixbuf *pb = gtk_clipboard_wait_for_image (c);
+  if (callback) callback (c, pb, user_data);
+  if (pb) g_object_unref (pb);
+}
+void gtk_clipboard_request_targets (GtkClipboard *c, GtkClipboardTargetsReceivedFunc callback, gpointer user_data)
+{
+  GdkAtom *atoms = nullptr;
+  gint n = 0;
+  gtk_clipboard_wait_for_targets (c, &atoms, &n);
+  if (callback) callback (c, atoms, n, user_data);
+  g_free (atoms);
+}
+
+/* ======================================================================
+ * Target lists
+ * ====================================================================== */
+GtkTargetList *gtk_target_list_new (const GtkTargetEntry *targets, guint ntargets)
+{
+  auto *l = g_new0 (GtkTargetList, 1);
+  l->ref_count = 1;
+  gtk_target_list_add_table (l, targets, ntargets);
+  return l;
+}
+GtkTargetList *gtk_target_list_ref (GtkTargetList *l) { if (l) l->ref_count++; return l; }
+void gtk_target_list_unref (GtkTargetList *l)
+{
+  if (!l || --l->ref_count) return;
+  g_list_free_full (l->list, g_free);
+  g_free (l);
+}
+GType gtk_target_list_get_type (void)
+{
+  static GType t = 0;
+  if (!t) t = g_boxed_type_register_static ("GtkTargetList", (GBoxedCopyFunc) gtk_target_list_ref, (GBoxedFreeFunc) gtk_target_list_unref);
+  return t;
+}
+void gtk_target_list_add (GtkTargetList *l, GdkAtom target, guint flags, guint info)
+{
+  if (!l) return;
+  auto *p = g_new (GtkTargetPair, 1);
+  *p = { target, flags, info };
+  l->list = g_list_append (l->list, p);
+}
+void gtk_target_list_add_table (GtkTargetList *l, const GtkTargetEntry *targets, guint ntargets)
+{
+  for (guint i = 0; targets && i < ntargets; i++)
+    gtk_target_list_add (l, gdk_atom_intern (targets[i].target, FALSE), targets[i].flags, targets[i].info);
+}
+void gtk_target_list_add_text_targets (GtkTargetList *l, guint info)
+{
+  for (const char *t : { "UTF8_STRING", "COMPOUND_TEXT", "TEXT", "STRING", "text/plain;charset=utf-8", "text/plain" })
+    gtk_target_list_add (l, gdk_atom_intern (t, FALSE), 0, info);
+}
+void gtk_target_list_add_image_targets (GtkTargetList *l, guint info, gboolean writable)
+{
+  /* the formats Qt reads (or writes), PNG first as GTK puts it */
+  QList<QByteArray> mimes = writable ? QImageWriter::supportedMimeTypes () : QImageReader::supportedMimeTypes ();
+  if (mimes.removeAll ("image/png")) mimes.prepend ("image/png");
+  for (const QByteArray &m : mimes) gtk_target_list_add (l, gdk_atom_intern (m.constData (), FALSE), 0, info);
+}
+void gtk_target_list_add_uri_targets (GtkTargetList *l, guint info)
+{
+  gtk_target_list_add (l, gdk_atom_intern ("text/uri-list", FALSE), 0, info);
+}
+void gtk_target_list_remove (GtkTargetList *l, GdkAtom target)
+{
+  for (GList *i = l ? l->list : nullptr; i; i = i->next)
+    if (((GtkTargetPair *) i->data)->target == target) {
+      g_free (i->data);
+      l->list = g_list_delete_link (l->list, i);
+      return;
+    }
+}
+gboolean gtk_target_list_find (GtkTargetList *l, GdkAtom target, guint *info)
+{
+  for (GList *i = l ? l->list : nullptr; i; i = i->next)
+    if (((GtkTargetPair *) i->data)->target == target) {
+      if (info) *info = ((GtkTargetPair *) i->data)->info;
+      return TRUE;
+    }
+  return FALSE;
+}
+GtkTargetEntry *gtk_target_table_new_from_list (GtkTargetList *l, gint *n_targets)
+{
+  gint n = l ? (gint) g_list_length (l->list) : 0;
+  if (n_targets) *n_targets = n;
+  if (!n) return nullptr;
+  auto *t = g_new0 (GtkTargetEntry, n);
+  int i = 0;
+  for (GList *it = l->list; it; it = it->next, i++) {
+    auto *p = (GtkTargetPair *) it->data;
+    t[i].target = gdk_atom_name (p->target);
+    t[i].flags = p->flags;
+    t[i].info = p->info;
+  }
+  return t;
+}
+void gtk_target_table_free (GtkTargetEntry *targets, gint n_targets)
+{
+  for (gint i = 0; targets && i < n_targets; i++) g_free (targets[i].target);
+  g_free (targets);
+}
+
 /* ======================================================================
  * Selection data and drops
  * ====================================================================== */
@@ -1352,6 +1749,69 @@ static GtkSelectionData *selection_data_copy (const GtkSelectionData *d)
   return n;
 }
 static void selection_data_free (GtkSelectionData *d) { if (d) { g_free (d->data); g_free (d); } }
+GtkSelectionData *gtk_selection_data_copy (const GtkSelectionData *d) { return d ? selection_data_copy (d) : nullptr; }
+void gtk_selection_data_free (GtkSelectionData *d) { selection_data_free (d); }
+
+/* an image as the requested image type (PNG unless the target names
+   another one Qt writes) */
+gboolean gtk_selection_data_set_pixbuf (GtkSelectionData *d, GdkPixbuf *pixbuf)
+{
+  if (!d || !pixbuf) return FALSE;
+  QByteArray target = atom_bytes (d->target), fmt = "png", mime = "image/png";
+  if (target.startsWith ("image/") && QImageWriter::supportedMimeTypes ().contains (target)) {
+    mime = target;
+    fmt = target.mid (6);
+    if (fmt == "x-bmp" || fmt == "x-MS-bmp") fmt = "bmp";
+  }
+  QByteArray bytes;
+  QBuffer buf (&bytes);
+  buf.open (QIODevice::WriteOnly);
+  if (!gtkqt_pixbuf_image (pixbuf).save (&buf, fmt.toUpper ().constData ())) return FALSE;
+  gtk_selection_data_set (d, gdk_atom_intern (mime.constData (), FALSE), 8, (const guchar *) bytes.constData (), bytes.size ());
+  return TRUE;
+}
+GdkPixbuf *gtk_selection_data_get_pixbuf (const GtkSelectionData *d)
+{
+  if (!d || !d->data || d->length <= 0) return nullptr;
+  QImage img = QImage::fromData ((const uchar *) d->data, d->length);
+  return img.isNull () ? nullptr : gtkqt_pixbuf_from_image (img);
+}
+gboolean gtk_selection_data_set_uris (GtkSelectionData *d, gchar **uris)
+{
+  if (!d || !uris) return FALSE;
+  GString *s = g_string_new (nullptr);
+  for (gchar **u = uris; *u; u++) g_string_append_printf (s, "%s\r\n", *u);
+  gtk_selection_data_set (d, gdk_atom_intern ("text/uri-list", FALSE), 8, (const guchar *) s->str, (gint) s->len);
+  g_string_free (s, TRUE);
+  return TRUE;
+}
+gboolean gtk_selection_data_get_targets (const GtkSelectionData *d, GdkAtom **targets, gint *n_atoms)
+{
+  bool ok = d && d->data && d->length >= 0 && atom_bytes (d->type) == "ATOM";
+  gint n = ok ? d->length / (gint) sizeof (GdkAtom) : 0;
+  if (targets) *targets = ok ? (GdkAtom *) g_memdup2 (d->data, n * sizeof (GdkAtom)) : nullptr;
+  if (n_atoms) *n_atoms = n;
+  return ok;
+}
+gboolean gtk_selection_data_targets_include_text (const GtkSelectionData *d)
+{
+  GdkAtom *ts; gint n; gboolean r = FALSE;
+  if (gtk_selection_data_get_targets (d, &ts, &n)) {
+    for (gint i = 0; i < n && !r; i++) r = target_is_text (atom_bytes (ts[i]));
+    g_free (ts);
+  }
+  return r;
+}
+gboolean gtk_selection_data_targets_include_image (const GtkSelectionData *d, gboolean writable)
+{
+  GdkAtom *ts; gint n; gboolean r = FALSE;
+  QList<QByteArray> ok = writable ? QImageWriter::supportedMimeTypes () : QImageReader::supportedMimeTypes ();
+  if (gtk_selection_data_get_targets (d, &ts, &n)) {
+    for (gint i = 0; i < n && !r; i++) r = ok.contains (atom_bytes (ts[i]));
+    g_free (ts);
+  }
+  return r;
+}
 GType gtk_selection_data_get_type (void)
 {
   static GType t = 0;
@@ -2351,6 +2811,16 @@ GtkAdjustment *gtkqt_scrollbar_adjustment (GObject *owner, const char *key, QScr
 /* GtkScrolledWindow adjustments, kept in step with the Qt scroll bars */
 static GtkAdjustment *scroll_adjustment (GtkScrolledWindow *sw, bool vertical)
 {
+  /* a child that scrolls itself (GtkLayout) has the window's adjustments */
+  if (GtkWidget *child = GTK_BIN (sw)->child) {
+    const char *prop = vertical ? "vadjustment" : "hadjustment";
+    GParamSpec *ps = g_object_class_find_property (G_OBJECT_GET_CLASS (child), prop);
+    if (ps && G_PARAM_SPEC_VALUE_TYPE (ps) == GTK_TYPE_ADJUSTMENT && (ps->flags & G_PARAM_READABLE)) {
+      GtkAdjustment *adj = nullptr;
+      g_object_get (child, prop, &adj, nullptr);
+      if (adj) { g_object_unref (adj); return adj; }
+    }
+  }
   QWidget *qw = gtkqt_qw (GTK_WIDGET (sw));
   QAbstractScrollArea *area = qw ? qw->findChild<QAbstractScrollArea *> (QString (), Qt::FindDirectChildrenOnly) : nullptr;
   QScrollBar *sb = area ? (vertical ? area->verticalScrollBar () : area->horizontalScrollBar ()) : nullptr;
@@ -2380,13 +2850,6 @@ static GdkColor color_of_rgba (const GdkRGBA *c)
   return g;
 }
 
-struct _GdkDevice { const char *name; GdkInputSource source; };
-struct _GdkSeat { int unused; };
-struct _GdkDeviceManager { int unused; };
-static GdkDevice core_pointer = { "Core Pointer", GDK_SOURCE_MOUSE };
-static GdkDevice core_keyboard = { "Core Keyboard", GDK_SOURCE_KEYBOARD };
-static GdkSeat default_seat;
-static GdkDeviceManager device_manager;
 
 extern "C" {
 void gtk_widget_override_font (GtkWidget *widget, const PangoFontDescription *font_desc)
@@ -2411,29 +2874,7 @@ void gtk_widget_override_background_color (GtkWidget *widget, GtkStateFlags stat
   gtk_widget_modify_base (widget, state_of_flags (state), color ? &c : nullptr);
 }
 
-GdkDevice *gtk_get_current_event_device (void) { return &core_pointer; }
 
-GdkWindow *gdk_window_get_device_position (GdkWindow *window, GdkDevice *, gint *x, gint *y, GdkModifierType *mask)
-{
-  return gdk_window_get_pointer (window, x, y, mask);
-}
-
-void gdk_device_get_position (GdkDevice *, GdkScreen **screen, gint *x, gint *y)
-{
-  QPoint p = QCursor::pos ();
-  if (screen) *screen = gdk_screen_get_default ();
-  if (x) *x = p.x ();
-  if (y) *y = p.y ();
-}
-
-const gchar *gdk_device_get_name (GdkDevice *d) { return d ? d->name : nullptr; }
-GdkInputSource gdk_device_get_source (GdkDevice *d) { return d ? d->source : GDK_SOURCE_MOUSE; }
-GdkDevice *gdk_device_get_associated_device (GdkDevice *d) { return d == &core_pointer ? &core_keyboard : &core_pointer; }
-GdkSeat *gdk_display_get_default_seat (GdkDisplay *) { return &default_seat; }
-GdkDevice *gdk_seat_get_pointer (GdkSeat *) { return &core_pointer; }
-GdkDevice *gdk_seat_get_keyboard (GdkSeat *) { return &core_keyboard; }
-GdkDeviceManager *gdk_display_get_device_manager (GdkDisplay *) { return &device_manager; }
-GdkDevice *gdk_device_manager_get_client_pointer (GdkDeviceManager *) { return &core_pointer; }
 } /* extern "C" */
 
 /* ======================================================================
@@ -2940,7 +3381,12 @@ void gtk_tool_item_set_tooltip (GtkToolItem *item, GtkTooltips *, const gchar *t
 }
 void gtk_toolbar_set_orientation (GtkToolbar *toolbar, GtkOrientation orientation)
 {
-  if (auto *tb = gtkqt_q<QToolBar> (GTK_WIDGET (toolbar))) tb->setOrientation (orientation == GTK_ORIENTATION_VERTICAL ? Qt::Vertical : Qt::Horizontal);
+  auto *tb = gtkqt_q<QToolBar> (GTK_WIDGET (toolbar));
+  if (!tb) return;
+  tb->setOrientation (orientation == GTK_ORIENTATION_VERTICAL ? Qt::Vertical : Qt::Horizontal);
+  GList *items = gtk_container_get_children (GTK_CONTAINER (toolbar));
+  for (GList *l = items; l; l = l->next) gtkqt_sync_visible ((GtkWidget *) l->data);   /* visible-horizontal/vertical */
+  g_list_free (items);
 }
 
 /* the key goes to the focus widget, then its parents, as GTK delivers it */
@@ -2964,3 +3410,115 @@ void gtk_window_set_skip_taskbar_hint (GtkWindow *, gboolean) {}
 void gtk_window_set_skip_pager_hint (GtkWindow *, gboolean) {}
 
 } /* extern "C" */
+
+/* ======================================================================
+ * GdkRegion on QRegion
+ * ====================================================================== */
+struct _GdkRegion { QRegion r; };
+
+static QRect qrect (const GdkRectangle *r) { return r ? QRect (r->x, r->y, r->width, r->height) : QRect (); }
+static GdkRectangle grect (const QRect &r) { return { r.x (), r.y (), r.width (), r.height () }; }
+
+extern "C" {
+
+GdkRegion *gdk_region_new (void) { return new GdkRegion; }
+GdkRegion *gdk_region_copy (const GdkRegion *region) { return new GdkRegion { region ? region->r : QRegion () }; }
+GdkRegion *gdk_region_rectangle (const GdkRectangle *rectangle)
+{
+  return new GdkRegion { rectangle && rectangle->width > 0 && rectangle->height > 0 ? QRegion (qrect (rectangle)) : QRegion () };
+}
+GdkRegion *gdk_region_polygon (const GdkPoint *points, gint n, GdkFillRule rule)
+{
+  QPolygon poly;
+  for (int i = 0; i < n; i++) poly << QPoint (points[i].x, points[i].y);
+  return new GdkRegion { QRegion (poly, rule == GDK_WINDING_RULE ? Qt::WindingFill : Qt::OddEvenFill) };
+}
+void gdk_region_destroy (GdkRegion *region) { delete region; }
+void gdk_region_get_clipbox (const GdkRegion *region, GdkRectangle *rect) { if (rect) *rect = grect (region->r.boundingRect ()); }
+void gdk_region_get_rectangles (const GdkRegion *region, GdkRectangle **rects, gint *n)
+{
+  int count = region->r.rectCount (), i = 0;
+  if (n) *n = count;
+  if (!rects) return;
+  *rects = g_new (GdkRectangle, qMax (count, 1));
+  for (const QRect &r : region->r) (*rects)[i++] = grect (r);
+}
+gboolean gdk_region_empty (const GdkRegion *region) { return region->r.isEmpty (); }
+gboolean gdk_region_equal (const GdkRegion *a, const GdkRegion *b) { return a->r == b->r; }
+gboolean gdk_region_rect_equal (const GdkRegion *region, const GdkRectangle *rect) { return region->r == QRegion (qrect (rect)); }
+gboolean gdk_region_point_in (const GdkRegion *region, int x, int y) { return region->r.contains (QPoint (x, y)); }
+GdkOverlapType gdk_region_rect_in (const GdkRegion *region, const GdkRectangle *rect)
+{
+  QRegion in = region->r.intersected (qrect (rect));
+  if (in.isEmpty ()) return GDK_OVERLAP_RECTANGLE_OUT;
+  return in == QRegion (qrect (rect)) ? GDK_OVERLAP_RECTANGLE_IN : GDK_OVERLAP_RECTANGLE_PART;
+}
+void gdk_region_offset (GdkRegion *region, gint dx, gint dy) { region->r.translate (dx, dy); }
+/* positive values shrink, negative ones grow, every rectangle (as X does) */
+void gdk_region_shrink (GdkRegion *region, gint dx, gint dy)
+{
+  QRegion out;
+  for (const QRect &r : region->r) {
+    QRect s = r.adjusted (dx, dy, -dx, -dy);
+    if (s.width () > 0 && s.height () > 0) out += s;
+  }
+  region->r = out;
+}
+void gdk_region_union_with_rect (GdkRegion *region, const GdkRectangle *rect)
+{
+  if (rect && rect->width > 0 && rect->height > 0) region->r += qrect (rect);
+}
+void gdk_region_intersect (GdkRegion *a, const GdkRegion *b) { a->r &= b->r; }
+void gdk_region_union (GdkRegion *a, const GdkRegion *b) { a->r += b->r; }
+void gdk_region_subtract (GdkRegion *a, const GdkRegion *b) { a->r -= b->r; }
+void gdk_region_xor (GdkRegion *a, const GdkRegion *b) { a->r ^= b->r; }
+
+void gdk_region_spans_intersect_foreach (GdkRegion *region, const GdkSpan *spans, int n, gboolean, GdkSpanFunc fn, gpointer data)
+{
+  for (int i = 0; i < n; i++)
+    for (const QRect &r : region->r) {
+      if (spans[i].y < r.top () || spans[i].y > r.bottom ()) continue;
+      int x0 = qMax (spans[i].x, r.left ()), x1 = qMin (spans[i].x + spans[i].width, r.right () + 1);
+      if (x1 > x0) {
+        GdkSpan out = { x0, spans[i].y, x1 - x0 };
+        fn (&out, data);
+      }
+    }
+}
+
+void gdk_gc_set_clip_region (GdkGC *gc, const GdkRegion *region)
+{
+  if (!gc) return;
+  gc->clip_rects.clear ();
+  gc->has_clip = region != nullptr;
+  if (!region) return;
+  for (const QRect &r : region->r) gc->clip_rects << r;
+  if (gc->clip_rects.isEmpty ()) gc->clip_rects << QRect (0, 0, 0, 0);   /* nothing gets drawn */
+  gc->clip = grect (region->r.boundingRect ());
+}
+
+void gdk_cairo_region (cairo_t *cr, const GdkRegion *region)
+{
+  for (const QRect &r : region->r) cairo_rectangle (cr, r.x (), r.y (), r.width (), r.height ());
+}
+
+void gdk_window_invalidate_region (GdkWindow *window, const GdkRegion *region, gboolean children)
+{
+  if (!window || !region) return;
+  for (const QRect &r : region->r) {
+    GdkRectangle g = grect (r);
+    gdk_window_invalidate_rect (window, &g, children);
+  }
+}
+
+/* what is waiting to be drawn is not kept: Qt merges it into its paint events */
+GdkRegion *gdk_window_get_update_area (GdkWindow *) { return nullptr; }
+/* drawing goes to a backing store already, as GTK's double buffering does */
+void gdk_window_begin_paint_region (GdkWindow *, const GdkRegion *) {}
+void gdk_window_begin_paint_rect (GdkWindow *, const GdkRectangle *) {}
+void gdk_window_end_paint (GdkWindow *) {}
+void gdk_window_freeze_updates (GdkWindow *window) { if (QWidget *qw = drawable_qwidget (window)) qw->setUpdatesEnabled (false); }
+void gdk_window_thaw_updates (GdkWindow *window) { if (QWidget *qw = drawable_qwidget (window)) qw->setUpdatesEnabled (true); }
+
+} /* extern "C" */
+

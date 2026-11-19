@@ -156,7 +156,22 @@ typedef struct {
   GdkDisplay *display;
 } GtkSelectionData;
 typedef struct _GtkTargetEntry { gchar *target; guint flags; guint info; } GtkTargetEntry;
-typedef struct _GtkTargetList GtkTargetList;
+typedef struct _GtkTargetList { GList *list; guint ref_count; } GtkTargetList;   /* of GtkTargetPair */
+typedef struct _GtkTargetPair { GdkAtom target; guint flags; guint info; } GtkTargetPair;
+#define GTK_TYPE_TARGET_LIST (gtk_target_list_get_type ())
+GType          gtk_target_list_get_type (void) G_GNUC_CONST;
+GtkTargetList *gtk_target_list_new (const GtkTargetEntry *targets, guint ntargets);
+GtkTargetList *gtk_target_list_ref (GtkTargetList *list);
+void           gtk_target_list_unref (GtkTargetList *list);
+void           gtk_target_list_add (GtkTargetList *list, GdkAtom target, guint flags, guint info);
+void           gtk_target_list_add_table (GtkTargetList *list, const GtkTargetEntry *targets, guint ntargets);
+void           gtk_target_list_add_text_targets (GtkTargetList *list, guint info);
+void           gtk_target_list_add_image_targets (GtkTargetList *list, guint info, gboolean writable);
+void           gtk_target_list_add_uri_targets (GtkTargetList *list, guint info);
+void           gtk_target_list_remove (GtkTargetList *list, GdkAtom target);
+gboolean       gtk_target_list_find (GtkTargetList *list, GdkAtom target, guint *info);
+GtkTargetEntry *gtk_target_table_new_from_list (GtkTargetList *list, gint *n_targets);
+void           gtk_target_table_free (GtkTargetEntry *targets, gint n_targets);
 typedef enum { GTK_TARGET_SAME_APP = 1 << 0, GTK_TARGET_SAME_WIDGET = 1 << 1,
                GTK_TARGET_OTHER_APP = 1 << 2, GTK_TARGET_OTHER_WIDGET = 1 << 3 } GtkTargetFlags;
 typedef enum { GTK_DEST_DEFAULT_MOTION = 1 << 0, GTK_DEST_DEFAULT_HIGHLIGHT = 1 << 1,
@@ -170,6 +185,38 @@ const guchar *gtk_selection_data_get_data (const GtkSelectionData *selection_dat
 gint      gtk_selection_data_get_length (const GtkSelectionData *selection_data);
 GdkAtom   gtk_selection_data_get_target (const GtkSelectionData *selection_data);
 void      gtk_selection_data_set (GtkSelectionData *selection_data, GdkAtom type, gint format, const guchar *data, gint length);
+GdkAtom   gtk_selection_data_get_data_type (const GtkSelectionData *selection_data);
+gint      gtk_selection_data_get_format (const GtkSelectionData *selection_data);
+GtkSelectionData *gtk_selection_data_copy (const GtkSelectionData *data);
+void      gtk_selection_data_free (GtkSelectionData *data);
+gboolean  gtk_selection_data_set_pixbuf (GtkSelectionData *selection_data, GdkPixbuf *pixbuf);
+GdkPixbuf *gtk_selection_data_get_pixbuf (const GtkSelectionData *selection_data);
+gboolean  gtk_selection_data_set_uris (GtkSelectionData *selection_data, gchar **uris);
+gboolean  gtk_selection_data_get_targets (const GtkSelectionData *selection_data, GdkAtom **targets, gint *n_atoms);
+gboolean  gtk_selection_data_targets_include_text (const GtkSelectionData *selection_data);
+gboolean  gtk_selection_data_targets_include_image (const GtkSelectionData *selection_data, gboolean writable);
+
+/* clipboard contents a program provides on request (get_func is called
+   when someone pastes; clear_func when the clipboard changes hands) */
+typedef void (*GtkClipboardGetFunc) (GtkClipboard *clipboard, GtkSelectionData *selection_data, guint info, gpointer user_data_or_owner);
+typedef void (*GtkClipboardClearFunc) (GtkClipboard *clipboard, gpointer user_data_or_owner);
+typedef void (*GtkClipboardReceivedFunc) (GtkClipboard *clipboard, GtkSelectionData *selection_data, gpointer data);
+typedef void (*GtkClipboardImageReceivedFunc) (GtkClipboard *clipboard, GdkPixbuf *pixbuf, gpointer data);
+typedef void (*GtkClipboardTargetsReceivedFunc) (GtkClipboard *clipboard, GdkAtom *atoms, gint n_atoms, gpointer data);
+gboolean   gtk_clipboard_set_with_data (GtkClipboard *clipboard, const GtkTargetEntry *targets, guint n_targets,
+                                        GtkClipboardGetFunc get_func, GtkClipboardClearFunc clear_func, gpointer user_data);
+gboolean   gtk_clipboard_set_with_owner (GtkClipboard *clipboard, const GtkTargetEntry *targets, guint n_targets,
+                                         GtkClipboardGetFunc get_func, GtkClipboardClearFunc clear_func, GObject *owner);
+GObject   *gtk_clipboard_get_owner (GtkClipboard *clipboard);
+void       gtk_clipboard_set_image (GtkClipboard *clipboard, GdkPixbuf *pixbuf);
+GtkSelectionData *gtk_clipboard_wait_for_contents (GtkClipboard *clipboard, GdkAtom target);
+GdkPixbuf *gtk_clipboard_wait_for_image (GtkClipboard *clipboard);
+gboolean   gtk_clipboard_wait_is_image_available (GtkClipboard *clipboard);
+gboolean   gtk_clipboard_wait_is_target_available (GtkClipboard *clipboard, GdkAtom target);
+gboolean   gtk_clipboard_wait_for_targets (GtkClipboard *clipboard, GdkAtom **targets, gint *n_targets);
+void       gtk_clipboard_request_contents (GtkClipboard *clipboard, GdkAtom target, GtkClipboardReceivedFunc callback, gpointer user_data);
+void       gtk_clipboard_request_image (GtkClipboard *clipboard, GtkClipboardImageReceivedFunc callback, gpointer user_data);
+void       gtk_clipboard_request_targets (GtkClipboard *clipboard, GtkClipboardTargetsReceivedFunc callback, gpointer user_data);
 void      gtk_drag_dest_set (GtkWidget *widget, GtkDestDefaults flags, const GtkTargetEntry *targets, gint n_targets, GdkDragAction actions);
 void      gtk_drag_dest_unset (GtkWidget *widget);
 void      gtk_drag_finish (GdkDragContext *context, gboolean success, gboolean del, guint32 time_);
@@ -309,8 +356,6 @@ typedef struct _GtkBuildable GtkBuildable;
 void         gtk_buildable_set_name (GtkBuildable *buildable, const gchar *name);
 const gchar *gtk_buildable_get_name (GtkBuildable *buildable);
 
-GdkAtom   gtk_selection_data_get_data_type (const GtkSelectionData *selection_data);
-gint      gtk_selection_data_get_format (const GtkSelectionData *selection_data);
 void      gtk_widget_get_pointer (GtkWidget *widget, gint *x, gint *y);
 void      gtk_widget_get_child_requisition (GtkWidget *widget, GtkRequisition *requisition);
 void      gtk_check_menu_item_toggled (GtkCheckMenuItem *check_menu_item);
@@ -320,6 +365,9 @@ void       gtk_widget_override_font (GtkWidget *widget, const PangoFontDescripti
 void       gtk_widget_override_color (GtkWidget *widget, GtkStateFlags state, const GdkRGBA *color);
 void       gtk_widget_override_background_color (GtkWidget *widget, GtkStateFlags state, const GdkRGBA *color);
 GdkDevice *gtk_get_current_event_device (void);
+/* a widget's events from tablet tools (pen, eraser): GDK_EXTENSION_EVENTS_ALL */
+void       gtk_widget_set_extension_events (GtkWidget *widget, GdkExtensionMode mode);
+GdkExtensionMode gtk_widget_get_extension_events (GtkWidget *widget);
 
 /* odds and ends of the GTK 2 API */
 typedef struct _GtkTooltips GtkTooltips;

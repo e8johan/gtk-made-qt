@@ -64,3 +64,10 @@ set_tests_properties(sylpheed PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
 gtkqt_add_program(test-pixbuf ${CMAKE_CURRENT_SOURCE_DIR}/test-pixbuf.c 2)
 add_test(NAME pixbuf COMMAND test-pixbuf)
 set_tests_properties(pixbuf PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
+
+# Xournal on libgnomecanvas: GtkLayout's bin_window, a scrolled window's
+# shared adjustments and scroll bars, a text view sized to its text,
+# pixbufs on caller memory, the clipboard with program-provided targets ...
+gtkqt_add_program(test-xournal ${CMAKE_CURRENT_SOURCE_DIR}/test-xournal.c 2)
+add_test(NAME xournal COMMAND test-xournal)
+set_tests_properties(xournal PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)

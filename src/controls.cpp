@@ -524,6 +524,9 @@ static void radio_join (GtkWidget *w, RadioGroup *g)
     g->qgroup->setExclusive (true);
   }
   bool first = g->members == nullptr;
+  /* as gtk_radio_button_set_group: joining a group with members makes it inactive */
+  if (!first)
+    if (auto *b = gtkqt_q<QAbstractButton> (w); b && b->isChecked ()) b->setChecked (false);
   g->members = g_slist_prepend (g->members, w);
   g->refs++;
   g_object_set_data (G_OBJECT (w), "gtkqt-radio-group", g);
@@ -531,8 +534,23 @@ static void radio_join (GtkWidget *w, RadioGroup *g)
   if (auto *b = gtkqt_q<QAbstractButton> (w)) {
     b->setAutoExclusive (false);
     g->qgroup->addButton (b);
-    if (first && GTK_IS_RADIO_BUTTON (w)) b->setChecked (true);
+    if (first && (GTK_IS_RADIO_BUTTON (w) || GTK_IS_RADIO_TOOL_BUTTON (w))) b->setChecked (true);
   }
+}
+
+/* for the other radio widgets (GtkRadioToolButton): join member's group, or a new one */
+void gtkqt_radio_join (GtkWidget *w, GtkWidget *member)
+{
+  radio_join (w, member ? radio_group_of (member) : nullptr);
+  if (member && !radio_group_of (member)) {
+    radio_join (member, nullptr);
+    radio_join (w, radio_group_of (member));
+  }
+}
+GSList *gtkqt_radio_members (GtkWidget *w)
+{
+  RadioGroup *g = radio_group_of (w);
+  return g ? g->members : nullptr;
 }
 
 static QObject *radio_create (GtkWidget *w)

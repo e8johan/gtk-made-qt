@@ -45,12 +45,20 @@ typedef struct _GtkObjectClass {
 } GtkObjectClass;
 typedef struct _GtkObject {
   union { GInitiallyUnowned parent_instance; GtkObjectClass *klass; };
+  guint32 flags;   /* GTK_IN_DESTRUCTION ...; widgets keep their GtkWidgetFlags here */
 } GtkObject;
+typedef enum { GTK_IN_DESTRUCTION = 1 << 0, GTK_FLOATING = 1 << 1, GTK_RESERVED_1 = 1 << 2, GTK_RESERVED_2 = 1 << 3 } GtkObjectFlags;
+#define GTK_OBJECT_FLAGS(obj)          (GTK_OBJECT (obj)->flags)
+#define GTK_OBJECT_SET_FLAGS(obj, f)   G_STMT_START { (GTK_OBJECT_FLAGS (obj) |= (f)); } G_STMT_END
+#define GTK_OBJECT_UNSET_FLAGS(obj, f) G_STMT_START { (GTK_OBJECT_FLAGS (obj) &= ~(f)); } G_STMT_END
 #else
 typedef GInitiallyUnowned GtkObject;
 typedef GInitiallyUnownedClass GtkObjectClass;
 #endif
-#define GTK_TYPE_OBJECT       G_TYPE_INITIALLY_UNOWNED
+/* "GtkObject": between GInitiallyUnowned and GtkWidget; programs' own
+ * GTK 1/2 objects (canvas items ...) derive from it and get "destroy" */
+GType gtk_object_get_type (void) G_GNUC_CONST;
+#define GTK_TYPE_OBJECT       (gtk_object_get_type ())
 #define GTK_OBJECT(obj)       ((GtkObject *) (obj))
 #define GTK_IS_OBJECT(obj)    G_IS_INITIALLY_UNOWNED (obj)
 #define GTK_OBJECT_TYPE(obj)  G_OBJECT_TYPE (obj)
@@ -205,6 +213,12 @@ void       gtk_widget_set_usize (GtkWidget *widget, gint width, gint height);
 void       gtk_widget_size_request (GtkWidget *widget, GtkRequisition *requisition);
 void       gtk_widget_get_preferred_size (GtkWidget *widget, GtkRequisition *minimum, GtkRequisition *natural);
 void       gtk_widget_get_allocation (GtkWidget *widget, GtkAllocation *allocation);
+/* text direction: Qt's layout direction */
+typedef enum { GTK_TEXT_DIR_NONE, GTK_TEXT_DIR_LTR, GTK_TEXT_DIR_RTL } GtkTextDirection;
+void             gtk_widget_set_direction (GtkWidget *widget, GtkTextDirection dir);
+GtkTextDirection gtk_widget_get_direction (GtkWidget *widget);
+void             gtk_widget_set_default_direction (GtkTextDirection dir);
+GtkTextDirection gtk_widget_get_default_direction (void);
 int        gtk_widget_get_allocated_width (GtkWidget *widget);
 int        gtk_widget_get_allocated_height (GtkWidget *widget);
 int        gtk_widget_get_width (GtkWidget *widget);
@@ -240,6 +254,7 @@ gboolean   gtk_widget_get_can_focus (GtkWidget *widget);
 void       gtk_widget_set_focusable (GtkWidget *widget, gboolean focusable);
 gboolean   gtk_widget_get_focusable (GtkWidget *widget);
 void       gtk_widget_set_focus_on_click (GtkWidget *widget, gboolean focus_on_click);
+gboolean   gtk_widget_get_focus_on_click (GtkWidget *widget);
 gboolean   gtk_widget_has_focus (GtkWidget *widget);
 gboolean   gtk_widget_is_focus (GtkWidget *widget);
 void       gtk_widget_grab_focus (GtkWidget *widget);
@@ -301,6 +316,8 @@ gboolean   gtk_style_context_has_class (GtkStyleContext *context, const gchar *c
 void       gtk_style_context_add_provider (GtkStyleContext *context, gpointer provider, guint priority);
 void       gtk_style_context_add_provider_for_screen (GdkScreen *screen, gpointer provider, guint priority);
 void       gtk_style_context_add_provider_for_display (GdkDisplay *display, gpointer provider, guint priority);
+GType      gtk_css_provider_get_type (void) G_GNUC_CONST;
+#define GTK_TYPE_CSS_PROVIDER (gtk_css_provider_get_type ())
 GtkCssProvider *gtk_css_provider_new (void);
 gboolean   gtk_css_provider_load_from_data (GtkCssProvider *provider, const gchar *data, gssize length, GError **error);
 void       gtk_css_provider_load_from_string (GtkCssProvider *provider, const char *string);
@@ -391,6 +408,7 @@ gboolean   gtk_window_is_maximized (GtkWindow *window);
 void       gtk_window_fullscreen (GtkWindow *window);
 void       gtk_window_unfullscreen (GtkWindow *window);
 void       gtk_window_iconify (GtkWindow *window);
+void       gtk_window_deiconify (GtkWindow *window);
 void       gtk_window_minimize (GtkWindow *window);
 gboolean   gtk_window_is_active (GtkWindow *window);
 void       gtk_window_set_focus (GtkWindow *window, GtkWidget *focus);

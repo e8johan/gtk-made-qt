@@ -788,6 +788,21 @@ void gdk_window_maximize (GdkWindow *window) { set_state (window, Qt::WindowMaxi
 void gdk_window_unmaximize (GdkWindow *window) { set_state (window, Qt::WindowMaximized, false); }
 void gdk_window_fullscreen (GdkWindow *window) { set_state (window, Qt::WindowFullScreen, true); }
 void gdk_window_unfullscreen (GdkWindow *window) { set_state (window, Qt::WindowFullScreen, false); }
+GdkWindowState gdk_window_get_state (GdkWindow *window)
+{
+  QWidget *qw = win_qwidget (window);
+  if (!qw) return GDK_WINDOW_STATE_WITHDRAWN;
+  qw = qw->window ();
+  int st = 0;
+  if (!qw->isVisible ()) st |= GDK_WINDOW_STATE_WITHDRAWN;
+  if (qw->windowState () & Qt::WindowMinimized) st |= GDK_WINDOW_STATE_ICONIFIED;
+  if (qw->windowState () & Qt::WindowMaximized) st |= GDK_WINDOW_STATE_MAXIMIZED;
+  if (qw->windowState () & Qt::WindowFullScreen) st |= GDK_WINDOW_STATE_FULLSCREEN;
+  if (qw->windowFlags () & Qt::WindowStaysOnTopHint) st |= GDK_WINDOW_STATE_ABOVE;
+  if (qw->windowFlags () & Qt::WindowStaysOnBottomHint) st |= GDK_WINDOW_STATE_BELOW;
+  if (qw->isActiveWindow ()) st |= GDK_WINDOW_STATE_FOCUSED;
+  return (GdkWindowState) st;
+}
 void gdk_window_stick (GdkWindow *) {}
 void gdk_window_unstick (GdkWindow *) {}
 void gdk_window_set_keep_above (GdkWindow *window, gboolean on)
@@ -824,11 +839,44 @@ void gdk_property_change (GdkWindow *, GdkAtom, GdkAtom, gint, GdkPropMode, cons
 void gdk_set_sm_client_id (const gchar *) {}
 void gdk_error_trap_push (void) {}
 gint gdk_error_trap_pop (void) { return 0; }
-gint gdk_pointer_grab (GdkWindow *, gboolean, gint, GdkWindow *, GdkCursor *, guint32) { return GDK_GRAB_SUCCESS; }
-void gdk_pointer_ungrab (guint32) {}
-gint gdk_keyboard_grab (GdkWindow *, gboolean, guint32) { return GDK_GRAB_SUCCESS; }
-void gdk_keyboard_ungrab (guint32) {}
-gboolean gdk_pointer_is_grabbed (void) { return FALSE; }
+/* grabs: the window's QWidget gets the mouse (keyboard) until ungrabbed */
+static QPointer<QWidget> pointer_grab, keyboard_grab;
+static QCursor cursor_of (GdkCursor *cursor);
+static QWidget *window_qwidget (GdkWindow *w)
+{
+  if (!w) return nullptr;
+  if (w->qw) return w->qw;
+  return w->widget ? gtkqt_qw (w->widget) : nullptr;
+}
+gint gdk_pointer_grab (GdkWindow *window, gboolean, gint, GdkWindow *, GdkCursor *cursor, guint32)
+{
+  QWidget *qw = window_qwidget (window);
+  if (!qw || !qw->isVisible ()) return GDK_GRAB_NOT_VIEWABLE;
+  if (pointer_grab && pointer_grab != qw) pointer_grab->releaseMouse ();
+  pointer_grab = qw;
+  if (cursor) qw->grabMouse (cursor_of (cursor)); else qw->grabMouse ();
+  return GDK_GRAB_SUCCESS;
+}
+void gdk_pointer_ungrab (guint32)
+{
+  if (pointer_grab) pointer_grab->releaseMouse ();
+  pointer_grab = nullptr;
+}
+gint gdk_keyboard_grab (GdkWindow *window, gboolean, guint32)
+{
+  QWidget *qw = window_qwidget (window);
+  if (!qw || !qw->isVisible ()) return GDK_GRAB_NOT_VIEWABLE;
+  if (keyboard_grab && keyboard_grab != qw) keyboard_grab->releaseKeyboard ();
+  keyboard_grab = qw;
+  qw->grabKeyboard ();
+  return GDK_GRAB_SUCCESS;
+}
+void gdk_keyboard_ungrab (guint32)
+{
+  if (keyboard_grab) keyboard_grab->releaseKeyboard ();
+  keyboard_grab = nullptr;
+}
+gboolean gdk_pointer_is_grabbed (void) { return pointer_grab != nullptr; }
 gint gdk_screen_width_mm (void) { gtkqt_ensure_app (); QScreen *s = QGuiApplication::primaryScreen (); return s ? (gint) s->physicalSize ().width () : 0; }
 gint gdk_screen_height_mm (void) { gtkqt_ensure_app (); QScreen *s = QGuiApplication::primaryScreen (); return s ? (gint) s->physicalSize ().height () : 0; }
 gchar *gdk_get_display (void) { const char *d = g_getenv ("DISPLAY"); return g_strdup (d ? d : ":0"); }
@@ -875,7 +923,17 @@ void gdk_input_remove (gint tag) { g_source_remove ((guint) tag); }
  * Cursors
  * ====================================================================== */
 } /* extern "C" */
-struct _GdkCursor { QCursor cursor; bool blank; };
+struct GtkQtCursor : _GdkCursor { QCursor cursor; QImage image; };
+static QCursor cursor_of (GdkCursor *cursor) { return static_cast<GtkQtCursor *> (cursor)->cursor; }
+static GdkCursor *cursor_new (GdkCursorType type, const QCursor &qc, const QImage &image = QImage ())
+{
+  auto *c = new GtkQtCursor;
+  c->type = type;
+  c->ref_count = 1;
+  c->cursor = qc;
+  c->image = image;
+  return c;
+}
 extern "C" {
 
 GdkCursor *gdk_cursor_new (GdkCursorType type)
@@ -883,31 +941,107 @@ GdkCursor *gdk_cursor_new (GdkCursorType type)
   gtkqt_ensure_app ();
   Qt::CursorShape shape = Qt::ArrowCursor;
   switch (type) {
-  case GDK_CROSSHAIR: case GDK_TCROSS: case GDK_PLUS: shape = Qt::CrossCursor; break;
+  case GDK_CROSSHAIR: case GDK_TCROSS: case GDK_PLUS: case GDK_TARGET: shape = Qt::CrossCursor; break;
   case GDK_FLEUR: shape = Qt::SizeAllCursor; break;
   case GDK_HAND1: case GDK_HAND2: shape = Qt::PointingHandCursor; break;
   case GDK_QUESTION_ARROW: shape = Qt::WhatsThisCursor; break;
-  case GDK_SB_H_DOUBLE_ARROW: shape = Qt::SizeHorCursor; break;
-  case GDK_SB_V_DOUBLE_ARROW: shape = Qt::SizeVerCursor; break;
+  case GDK_SB_H_DOUBLE_ARROW: case GDK_LEFT_SIDE: case GDK_RIGHT_SIDE:
+  case GDK_SB_LEFT_ARROW: case GDK_SB_RIGHT_ARROW: shape = Qt::SizeHorCursor; break;
+  case GDK_SB_V_DOUBLE_ARROW: case GDK_TOP_SIDE: case GDK_BOTTOM_SIDE:
+  case GDK_SB_UP_ARROW: case GDK_SB_DOWN_ARROW: shape = Qt::SizeVerCursor; break;
   case GDK_TOP_LEFT_CORNER: case GDK_BOTTOM_RIGHT_CORNER: case GDK_SIZING: shape = Qt::SizeFDiagCursor; break;
+  case GDK_TOP_RIGHT_CORNER: case GDK_BOTTOM_LEFT_CORNER: shape = Qt::SizeBDiagCursor; break;
   case GDK_WATCH: shape = Qt::WaitCursor; break;
   case GDK_XTERM: shape = Qt::IBeamCursor; break;
   case GDK_CIRCLE: shape = Qt::ForbiddenCursor; break;
+  case GDK_DOT: case GDK_DOTBOX: shape = Qt::CrossCursor; break;
   case GDK_BLANK_CURSOR: shape = Qt::BlankCursor; break;
   default: break;
   }
-  return new _GdkCursor { QCursor (shape), type == GDK_BLANK_CURSOR };
+  return cursor_new (type, QCursor (shape));
 }
-GdkCursor *gdk_cursor_new_from_pixmap (GdkPixmap *, GdkPixmap *, const GdkColor *, const GdkColor *, gint, gint)
+GdkCursor *gdk_cursor_new_for_display (GdkDisplay *, GdkCursorType type) { return gdk_cursor_new (type); }
+
+/* X cursor bitmaps: source bit set -> foreground, clear -> background,
+   shown only where the mask bit is set */
+static bool bitmap_bit (cairo_surface_t *s, int x, int y)
 {
-  return gdk_cursor_new (GDK_LEFT_PTR);
+  int stride = cairo_image_surface_get_stride (s);
+  const uchar *row = cairo_image_surface_get_data (s) + y * stride;
+  switch (cairo_image_surface_get_format (s)) {
+  case CAIRO_FORMAT_A8: return row[x] != 0;
+  case CAIRO_FORMAT_A1: return (row[x / 8] >> (x % 8)) & 1;
+  default: return (reinterpret_cast<const quint32 *> (row)[x] & 0xffffff) != 0;
+  }
 }
-void gdk_cursor_destroy (GdkCursor *cursor) { delete cursor; }
+GdkCursor *gdk_cursor_new_from_pixmap (GdkPixmap *source, GdkPixmap *mask, const GdkColor *fg, const GdkColor *bg, gint x, gint y)
+{
+  gtkqt_ensure_app ();
+  cairo_surface_t *src = gtkqt_drawable_target (source);
+  cairo_surface_t *msk = mask ? gtkqt_drawable_target (mask) : nullptr;
+  if (!src || cairo_surface_get_type (src) != CAIRO_SURFACE_TYPE_IMAGE) return gdk_cursor_new (GDK_LEFT_PTR);
+  cairo_surface_flush (src);
+  if (msk) cairo_surface_flush (msk);
+  int w = cairo_image_surface_get_width (src), h = cairo_image_surface_get_height (src);
+  int mw = msk ? cairo_image_surface_get_width (msk) : 0, mh = msk ? cairo_image_surface_get_height (msk) : 0;
+  QRgb f = fg ? qRgb (fg->red >> 8, fg->green >> 8, fg->blue >> 8) : qRgb (0, 0, 0);
+  QRgb b = bg ? qRgb (bg->red >> 8, bg->green >> 8, bg->blue >> 8) : qRgb (255, 255, 255);
+  QImage img (w, h, QImage::Format_ARGB32);
+  for (int j = 0; j < h; j++)
+    for (int i = 0; i < w; i++) {
+      bool shown = !msk || (i < mw && j < mh && bitmap_bit (msk, i, j));
+      img.setPixel (i, j, shown ? (bitmap_bit (src, i, j) ? f : b) : 0);
+    }
+  return cursor_new (GDK_CURSOR_IS_PIXMAP, QCursor (QPixmap::fromImage (img), x, y), img);
+}
+GdkCursor *gdk_cursor_new_from_pixbuf (GdkDisplay *, GdkPixbuf *pixbuf, gint x, gint y)
+{
+  gtkqt_ensure_app ();
+  if (!pixbuf) return gdk_cursor_new (GDK_LEFT_PTR);
+  QImage img = gtkqt_pixbuf_image (pixbuf);
+  return cursor_new (GDK_CURSOR_IS_PIXMAP, QCursor (QPixmap::fromImage (img), x, y), img);
+}
+GdkCursor *gdk_cursor_new_from_name (GdkDisplay *, const gchar *name)
+{
+  static const struct { const char *name; GdkCursorType type; } names[] = {
+    { "default", GDK_LEFT_PTR }, { "left_ptr", GDK_LEFT_PTR }, { "arrow", GDK_ARROW },
+    { "pointer", GDK_HAND2 }, { "hand2", GDK_HAND2 }, { "hand1", GDK_HAND1 },
+    { "text", GDK_XTERM }, { "xterm", GDK_XTERM }, { "wait", GDK_WATCH }, { "watch", GDK_WATCH },
+    { "crosshair", GDK_CROSSHAIR }, { "move", GDK_FLEUR }, { "fleur", GDK_FLEUR },
+    { "help", GDK_QUESTION_ARROW }, { "not-allowed", GDK_CIRCLE }, { "none", GDK_BLANK_CURSOR },
+    { "ew-resize", GDK_SB_H_DOUBLE_ARROW }, { "col-resize", GDK_SB_H_DOUBLE_ARROW },
+    { "ns-resize", GDK_SB_V_DOUBLE_ARROW }, { "row-resize", GDK_SB_V_DOUBLE_ARROW },
+    { "n-resize", GDK_TOP_SIDE }, { "s-resize", GDK_BOTTOM_SIDE }, { "w-resize", GDK_LEFT_SIDE },
+    { "e-resize", GDK_RIGHT_SIDE }, { "nw-resize", GDK_TOP_LEFT_CORNER }, { "se-resize", GDK_BOTTOM_RIGHT_CORNER },
+    { "ne-resize", GDK_TOP_RIGHT_CORNER }, { "sw-resize", GDK_BOTTOM_LEFT_CORNER },
+    { "nwse-resize", GDK_TOP_LEFT_CORNER }, { "nesw-resize", GDK_TOP_RIGHT_CORNER },
+    { "top_side", GDK_TOP_SIDE }, { "bottom_side", GDK_BOTTOM_SIDE }, { "left_side", GDK_LEFT_SIDE },
+    { "right_side", GDK_RIGHT_SIDE }, { "pencil", GDK_PENCIL }, { "cell", GDK_PLUS }, { "plus", GDK_PLUS },
+  };
+  if (name)
+    for (const auto &n : names)
+      if (!strcmp (n.name, name)) return gdk_cursor_new (n.type);
+  return nullptr;
+}
+GdkPixbuf *gdk_cursor_get_image (GdkCursor *cursor)
+{
+  auto *c = static_cast<GtkQtCursor *> (cursor);
+  if (!c || c->image.isNull ()) return nullptr;
+  return gtkqt_pixbuf_from_image (c->image);
+}
+GdkCursorType gdk_cursor_get_cursor_type (GdkCursor *cursor) { return cursor ? cursor->type : GDK_LEFT_PTR; }
+GdkDisplay *gdk_cursor_get_display (GdkCursor *) { return gdk_display_get_default (); }
+GdkCursor *gdk_cursor_ref (GdkCursor *cursor) { if (cursor) cursor->ref_count++; return cursor; }
+void gdk_cursor_unref (GdkCursor *cursor)
+{
+  if (cursor && --cursor->ref_count == 0) delete static_cast<GtkQtCursor *> (cursor);
+}
+void gdk_cursor_destroy (GdkCursor *cursor) { gdk_cursor_unref (cursor); }
 void gdk_window_set_cursor (GdkWindow *window, GdkCursor *cursor)
 {
   QWidget *qw = win_qwidget (window);
   if (!qw) return;
-  if (cursor) qw->setCursor (cursor->cursor); else qw->unsetCursor ();
+  if (cursor) qw->setCursor (cursor_of (cursor)); else qw->unsetCursor ();
 }
 
 } /* extern "C" */
@@ -1335,6 +1469,12 @@ void gdk_rgb_init (void) {}
 GdkVisual *gdk_rgb_get_visual (void) { return gdk_visual_get_system (); }
 GdkColormap *gdk_rgb_get_cmap (void) { return gdk_colormap_get_system (); }
 gulong gdk_rgb_xpixel_from_rgb (guint32 rgb) { return rgb & 0xffffff; }
+/* pixels are 24-bit RGB */
+void gdk_rgb_find_color (GdkColormap *, GdkColor *color)
+{
+  if (color) color->pixel = ((guint32) (color->red >> 8) << 16) | ((guint32) (color->green >> 8) << 8) | (color->blue >> 8);
+}
+
 void gdk_rgb_gc_set_foreground (GdkGC *gc, guint32 rgb)
 {
   GdkColor c = { rgb & 0xffffff, (guint16) (((rgb >> 16) & 0xff) * 257), (guint16) (((rgb >> 8) & 0xff) * 257), (guint16) ((rgb & 0xff) * 257) };

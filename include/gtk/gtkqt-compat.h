@@ -76,7 +76,6 @@ void       (gtk_idle_remove) (guint id);
 #define gtk_object_ref(o)                           g_object_ref (o)
 #define gtk_object_unref(o)                         g_object_unref (o)
 #define gtk_object_sink(o)                          g_object_ref_sink (o)
-#define gtk_object_destroy(o)                       gtk_widget_destroy (GTK_WIDGET (o))
 #define gtk_widget_ref(w)                           g_object_ref (w)
 #define gtk_widget_unref(w)                         g_object_unref (w)
 #define gtk_timeout_add(ms, f, d)                   g_timeout_add ((ms), (GSourceFunc) (f), (d))

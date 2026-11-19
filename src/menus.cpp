@@ -1062,7 +1062,7 @@ static void toolbar_place (GtkContainer *c, GtkWidget *child)
   QAction *a = pos >= 0 && pos < acts.size () ? t->insertWidget (acts.at (pos), cw) : t->addWidget (cw);
   cw->setProperty ("_gtkqt_vis_action", QVariant::fromValue ((QObject *) a));
   cw->show ();
-  a->setVisible (child->priv->visible);
+  gtkqt_sync_visible (child);   /* through the action, honouring visible-horizontal/vertical */
 }
 
 static void toolbar_unplace (GtkContainer *c, GtkWidget *child)
@@ -1117,6 +1117,7 @@ G_DEFINE_TYPE (GtkToolItem, gtk_tool_item, GTK_TYPE_BIN)
 G_DEFINE_TYPE (GtkToolButton, gtk_tool_button, GTK_TYPE_TOOL_ITEM)
 G_DEFINE_TYPE (GtkToggleToolButton, gtk_toggle_tool_button, GTK_TYPE_TOOL_BUTTON)
 G_DEFINE_TYPE (GtkSeparatorToolItem, gtk_separator_tool_item, GTK_TYPE_TOOL_ITEM)
+G_DEFINE_TYPE (GtkRadioToolButton, gtk_radio_tool_button, GTK_TYPE_TOGGLE_TOOL_BUTTON)
 
 static void gtk_toolbar_init (GtkToolbar *) {}
 static void gtk_toolbar_class_init (GtkToolbarClass *klass)
@@ -1178,6 +1179,10 @@ static void gtk_toggle_tool_button_class_init (GtkToggleToolButtonClass *klass)
   gtkqt_set_create (GTK_WIDGET_CLASS (klass), toggle_tool_button_create);
   g_signal_new ("toggled", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_FIRST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
 }
+/* a radio tool button joins a group of its own until set_group; the
+   first of a group starts active, as GtkRadioButton does */
+static void gtk_radio_tool_button_init (GtkRadioToolButton *) {}
+static void gtk_radio_tool_button_class_init (GtkRadioToolButtonClass *) {}
 static void gtk_separator_tool_item_init (GtkSeparatorToolItem *) {}
 static void gtk_separator_tool_item_class_init (GtkSeparatorToolItemClass *klass) { gtkqt_set_create (GTK_WIDGET_CLASS (klass), separator_tool_create); }
 
@@ -1223,12 +1228,7 @@ GtkToolItem *gtk_tool_button_new (GtkWidget *icon_widget, const gchar *label)
 {
   auto *item = (GtkToolItem *) g_object_new (GTK_TYPE_TOOL_BUTTON, nullptr);
   gtk_tool_button_set_label (GTK_TOOL_BUTTON (item), label);
-  if (icon_widget) {
-    if (auto *l = gtkqt_q<QLabel> (icon_widget))
-      if (auto *b = gtkqt_q<QToolButton> (GTK_WIDGET (item))) b->setIcon (QIcon (l->pixmap (Qt::ReturnByValue)));
-    g_object_ref_sink (icon_widget);
-    g_object_set_data_full (G_OBJECT (item), "gtkqt-icon-widget", icon_widget, g_object_unref);
-  }
+  if (icon_widget) gtk_tool_button_set_icon_widget (GTK_TOOL_BUTTON (item), icon_widget);
   return item;
 }
 
@@ -1265,6 +1265,78 @@ gboolean gtk_toggle_tool_button_get_active (GtkToggleToolButton *button)
   auto *b = gtkqt_q<QToolButton> (GTK_WIDGET (button));
   return b && b->isChecked ();
 }
+
+GtkToolItem *gtk_radio_tool_button_new (GSList *group)
+{
+  auto *item = (GtkToolItem *) g_object_new (GTK_TYPE_RADIO_TOOL_BUTTON, nullptr);
+  gtkqt_radio_join (GTK_WIDGET (item), group ? (GtkWidget *) group->data : nullptr);
+  return item;
+}
+GtkToolItem *gtk_radio_tool_button_new_from_stock (GSList *group, const gchar *stock_id)
+{
+  GtkToolItem *item = gtk_radio_tool_button_new (group);
+  g_object_set (item, "stock-id", stock_id, nullptr);
+  return item;
+}
+GtkToolItem *gtk_radio_tool_button_new_from_widget (GtkRadioToolButton *group)
+{
+  return gtk_radio_tool_button_new (group ? gtk_radio_tool_button_get_group (group) : nullptr);
+}
+GtkToolItem *gtk_radio_tool_button_new_with_stock_from_widget (GtkRadioToolButton *group, const gchar *stock_id)
+{
+  return gtk_radio_tool_button_new_from_stock (group ? gtk_radio_tool_button_get_group (group) : nullptr, stock_id);
+}
+GSList *gtk_radio_tool_button_get_group (GtkRadioToolButton *button) { return gtkqt_radio_members (GTK_WIDGET (button)); }
+void gtk_radio_tool_button_set_group (GtkRadioToolButton *button, GSList *group)
+{
+  gtkqt_radio_join (GTK_WIDGET (button), group ? (GtkWidget *) group->data : nullptr);
+}
+
+/* the icon is the image widget's picture (any other widget is grabbed) */
+static void tool_button_take_icon (GtkToolButton *button)
+{
+  auto *b = gtkqt_q<QToolButton> (GTK_WIDGET (button));
+  auto *icon_widget = (GtkWidget *) g_object_get_data (G_OBJECT (button), "gtkqt-icon-widget");
+  if (!b) return;
+  if (!icon_widget) { b->setIcon (QIcon ()); return; }
+  QWidget *qw = gtkqt_qw (icon_widget);
+  if (auto *l = qobject_cast<QLabel *> (qw)) {
+    QPixmap pm = l->pixmap (Qt::ReturnByValue);
+    b->setIcon (QIcon (pm));
+    if (!pm.isNull ()) b->setIconSize (pm.deviceIndependentSize ().toSize ());   /* GTK shows the image at its size */
+  } else if (qw) {
+    qw->resize (qw->sizeHint ());
+    QPixmap pm = qw->grab ();
+    b->setIcon (QIcon (pm));
+    b->setIconSize (qw->size ());
+  }
+}
+void gtk_tool_button_set_icon_widget (GtkToolButton *button, GtkWidget *icon_widget)
+{
+  if (icon_widget) g_object_ref_sink (icon_widget);
+  g_object_set_data_full (G_OBJECT (button), "gtkqt-icon-widget", icon_widget, icon_widget ? g_object_unref : nullptr);
+  if (icon_widget && GTK_IS_IMAGE (icon_widget))   /* later changes of the image follow */
+    g_signal_connect_object (icon_widget, "notify", G_CALLBACK (+[] (GObject *, GParamSpec *, gpointer b) {
+      tool_button_take_icon (GTK_TOOL_BUTTON (b));
+    }), button, (GConnectFlags) 0);
+  tool_button_take_icon (button);
+}
+GtkWidget *gtk_tool_button_get_icon_widget (GtkToolButton *button)
+{
+  return (GtkWidget *) g_object_get_data (G_OBJECT (button), "gtkqt-icon-widget");
+}
+void gtk_tool_item_set_visible_horizontal (GtkToolItem *item, gboolean visible)
+{
+  g_object_set_data (G_OBJECT (item), "gtkqt-hide-horizontal", GINT_TO_POINTER (!visible));
+  gtkqt_sync_visible (GTK_WIDGET (item));
+}
+void gtk_tool_item_set_visible_vertical (GtkToolItem *item, gboolean visible)
+{
+  g_object_set_data (G_OBJECT (item), "gtkqt-hide-vertical", GINT_TO_POINTER (!visible));
+  gtkqt_sync_visible (GTK_WIDGET (item));
+}
+gboolean gtk_tool_item_get_visible_horizontal (GtkToolItem *item) { return !g_object_get_data (G_OBJECT (item), "gtkqt-hide-horizontal"); }
+gboolean gtk_tool_item_get_visible_vertical (GtkToolItem *item) { return !g_object_get_data (G_OBJECT (item), "gtkqt-hide-vertical"); }
 
 GtkToolItem *gtk_separator_tool_item_new (void) { return (GtkToolItem *) g_object_new (GTK_TYPE_SEPARATOR_TOOL_ITEM, nullptr); }
 void gtk_tool_item_set_tooltip_text (GtkToolItem *tool_item, const gchar *text) { gtk_widget_set_tooltip_text (GTK_WIDGET (tool_item), text); }
