@@ -331,6 +331,23 @@ void       gtk_image_set_from_icon_name (GtkImage *image, const gchar *icon_name
 void       gtk_image_set_from_pixbuf (GtkImage *image, GdkPixbuf *pixbuf);
 void       gtk_image_set_pixel_size (GtkImage *image, gint pixel_size);
 void       gtk_image_clear (GtkImage *image);
+typedef enum {
+  GTK_IMAGE_EMPTY, GTK_IMAGE_PIXMAP, GTK_IMAGE_IMAGE, GTK_IMAGE_PIXBUF, GTK_IMAGE_STOCK, GTK_IMAGE_ICON_SET,
+  GTK_IMAGE_ANIMATION, GTK_IMAGE_ICON_NAME, GTK_IMAGE_GICON
+} GtkImageType;
+GtkImageType gtk_image_get_storage_type (GtkImage *image);
+GdkPixbuf *gtk_image_get_pixbuf (GtkImage *image);
+void       gtk_image_set_from_animation (GtkImage *image, GdkPixbufAnimation *animation);
+GtkWidget *gtk_image_new_from_animation (GdkPixbufAnimation *animation);
+GdkPixbufAnimation *gtk_image_get_animation (GtkImage *image);
+void       gtk_image_set_from_stock (GtkImage *image, const gchar *stock_id, GtkIconSize size);
+void       gtk_image_get_stock (GtkImage *image, gchar **stock_id, GtkIconSize *size);
+void       gtk_image_get_icon_name (GtkImage *image, const gchar **icon_name, GtkIconSize *size);
+gint       gtk_image_get_pixel_size (GtkImage *image);
+void       gtk_image_set_from_gicon (GtkImage *image, GIcon *icon, GtkIconSize size);
+GtkWidget *gtk_image_new_from_gicon (GIcon *icon, GtkIconSize size);
+void       gtk_image_set_from_resource (GtkImage *image, const gchar *resource_path);
+GtkWidget *gtk_image_new_from_resource (const gchar *resource_path);
 GtkWidget *gtk_picture_new_for_filename (const char *filename);
 
 /* GtkSpinner */

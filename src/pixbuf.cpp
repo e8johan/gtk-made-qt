@@ -18,6 +18,9 @@
 #include <QHash>
 #include <cstring>
 
+/* the animation API takes GLib's deprecated GTimeVal, as gdk-pixbuf's does */
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+
 struct _GdkPixbuf {
   GObject parent_instance;
   gpointer image;                        /* QImage */
@@ -498,3 +501,406 @@ gboolean gdk_pixbuf_save_to_callback (GdkPixbuf *pixbuf, GdkPixbufSaveFunc fn, g
 }
 
 } /* extern "C" */
+
+/* ======================================================================
+ * Formats: the ones Qt's image plugins read
+ * ====================================================================== */
+struct _GdkPixbufFormat {
+  QByteArray name, description;
+  QList<QByteArray> mime_types, extensions;
+  bool writable = false, scalable = false, disabled = false;
+};
+
+static QList<GdkPixbufFormat *> &pixbuf_formats ()
+{
+  static QList<GdkPixbufFormat *> formats;
+  if (!formats.isEmpty ()) return formats;
+  QList<QByteArray> writable = QImageWriter::supportedImageFormats ();
+  QList<QByteArray> mimes = QImageReader::supportedMimeTypes ();
+  /* gdk-pixbuf's names: "jpeg" covers "jpg", "tiff" covers "tif" ... */
+  static const struct { const char *qt, *name, *extra_ext; } aliases[] = {
+    { "jpg", "jpeg", nullptr }, { "tif", "tiff", nullptr }, { "svgz", "svg", nullptr }, { "pbmraw", nullptr, nullptr },
+    { "pgmraw", nullptr, nullptr }, { "ppmraw", nullptr, nullptr },
+  };
+  QHash<QByteArray, GdkPixbufFormat *> by_name;
+  for (QByteArray f : QImageReader::supportedImageFormats ()) {
+    QByteArray name = f.toLower (), ext = f.toLower ();
+    bool skip = false;
+    for (const auto &a : aliases)
+      if (name == a.qt) { if (!a.name) skip = true; else name = a.name; }
+    if (skip) continue;
+    GdkPixbufFormat *fmt = by_name.value (name);
+    if (!fmt) {
+      fmt = new GdkPixbufFormat;
+      fmt->name = name;
+      fmt->description = name.toUpper ();
+      for (const QByteArray &m : mimes)
+        if (m.endsWith ("/" + name) || m.endsWith ("/x-" + name) || (name == "svg" && m == "image/svg+xml")) fmt->mime_types << m;
+      fmt->scalable = name == "svg";
+      by_name.insert (name, fmt);
+      formats << fmt;
+    }
+    if (!fmt->extensions.contains (ext)) fmt->extensions << ext;
+    if (writable.contains (f)) fmt->writable = true;
+  }
+  return formats;
+}
+
+static gchar **strv_of (const QList<QByteArray> &l)
+{
+  gchar **v = g_new0 (gchar *, l.size () + 1);
+  for (int i = 0; i < l.size (); i++) v[i] = g_strdup (l[i].constData ());
+  return v;
+}
+
+static GdkPixbufFormat *format_named (const QByteArray &qt_name)
+{
+  QByteArray n = qt_name.toLower ();
+  for (GdkPixbufFormat *f : pixbuf_formats ())
+    if (f->name == n || f->extensions.contains (n)) return f;
+  return nullptr;
+}
+
+/* ======================================================================
+ * Animations: every frame decoded with its delay
+ * ====================================================================== */
+struct AnimFrame { QImage image; int delay; };
+struct _GdkPixbufAnimation {
+  GObject parent_instance;
+  QList<AnimFrame> *frames;
+  int loops;   /* 0: forever */
+  GdkPixbuf *static_image;
+};
+typedef struct { GObjectClass parent_class; } GdkPixbufAnimationClass;
+G_DEFINE_TYPE (GdkPixbufAnimation, gdk_pixbuf_animation, G_TYPE_OBJECT)
+static void gdk_pixbuf_animation_init (GdkPixbufAnimation *a) { a->frames = new QList<AnimFrame>; }
+static void animation_finalize (GObject *o)
+{
+  auto *a = (GdkPixbufAnimation *) o;
+  delete a->frames;
+  if (a->static_image) g_object_unref (a->static_image);
+  G_OBJECT_CLASS (gdk_pixbuf_animation_parent_class)->finalize (o);
+}
+static void gdk_pixbuf_animation_class_init (GdkPixbufAnimationClass *klass) { G_OBJECT_CLASS (klass)->finalize = animation_finalize; }
+
+struct _GdkPixbufAnimationIter {
+  GObject parent_instance;
+  GdkPixbufAnimation *anim;
+  gint64 start;   /* microseconds */
+  int frame;
+  GdkPixbuf *pixbuf;
+};
+typedef struct { GObjectClass parent_class; } GdkPixbufAnimationIterClass;
+G_DEFINE_TYPE (GdkPixbufAnimationIter, gdk_pixbuf_animation_iter, G_TYPE_OBJECT)
+static void gdk_pixbuf_animation_iter_init (GdkPixbufAnimationIter *) {}
+static void animation_iter_finalize (GObject *o)
+{
+  auto *it = (GdkPixbufAnimationIter *) o;
+  if (it->pixbuf) g_object_unref (it->pixbuf);
+  g_object_unref (it->anim);
+  G_OBJECT_CLASS (gdk_pixbuf_animation_iter_parent_class)->finalize (o);
+}
+static void gdk_pixbuf_animation_iter_class_init (GdkPixbufAnimationIterClass *klass) { G_OBJECT_CLASS (klass)->finalize = animation_iter_finalize; }
+
+static GdkPixbufAnimation *animation_read (QIODevice *dev, const QByteArray &format, QSize size, QString *why)
+{
+  QImageReader reader (dev, format);
+  reader.setAutoTransform (true);
+  if (size.isValid ()) reader.setScaledSize (size);
+  auto *a = (GdkPixbufAnimation *) g_object_new (gdk_pixbuf_animation_get_type (), nullptr);
+  a->loops = reader.loopCount () < 0 ? 0 : reader.loopCount ();
+  for (;;) {
+    QImage img = reader.read ();
+    if (img.isNull ()) break;
+    /* GIF and friends: no delay means a tenth of a second, as gdk-pixbuf does */
+    int delay = reader.nextImageDelay ();
+    a->frames->append ({ normalized (img), delay > 0 ? delay : 100 });
+    if (!reader.supportsAnimation () || !reader.canRead ()) break;
+  }
+  if (a->frames->isEmpty ()) {
+    if (why) *why = reader.errorString ();
+    g_object_unref (a);
+    return nullptr;
+  }
+  a->static_image = gtkqt_pixbuf_from_image (a->frames->first ().image);
+  return a;
+}
+
+/* ======================================================================
+ * The loader: pieces collected, the size known as soon as the header
+ * is, the image decoded when it is complete (or on close)
+ * ====================================================================== */
+struct LoaderData {
+  QByteArray data, format;
+  QSize request;          /* gdk_pixbuf_loader_set_size */
+  bool size_known = false, decoded = false, closed = false;
+  GdkPixbufAnimation *anim = nullptr;
+  GdkPixbufFormat *fmt = nullptr;
+};
+static LoaderData *ld (gpointer l) { return static_cast<LoaderData *> (((GdkPixbufLoader *) l)->priv); }
+G_DEFINE_TYPE (GdkPixbufLoader, gdk_pixbuf_loader, G_TYPE_OBJECT)
+static void gdk_pixbuf_loader_init (GdkPixbufLoader *l) { l->priv = new LoaderData; }
+static void loader_finalize (GObject *o)
+{
+  LoaderData *d = ld (o);
+  if (d->anim) g_object_unref (d->anim);
+  delete d;
+  G_OBJECT_CLASS (gdk_pixbuf_loader_parent_class)->finalize (o);
+}
+static void gdk_pixbuf_loader_class_init (GdkPixbufLoaderClass *klass)
+{
+  G_OBJECT_CLASS (klass)->finalize = loader_finalize;
+  GType t = G_TYPE_FROM_CLASS (klass);
+  g_signal_new ("size-prepared", t, G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET (GdkPixbufLoaderClass, size_prepared), nullptr, nullptr,
+                nullptr, G_TYPE_NONE, 2, G_TYPE_INT, G_TYPE_INT);
+  g_signal_new ("area-prepared", t, G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET (GdkPixbufLoaderClass, area_prepared), nullptr, nullptr,
+                nullptr, G_TYPE_NONE, 0);
+  g_signal_new ("area-updated", t, G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET (GdkPixbufLoaderClass, area_updated), nullptr, nullptr,
+                nullptr, G_TYPE_NONE, 4, G_TYPE_INT, G_TYPE_INT, G_TYPE_INT, G_TYPE_INT);
+  g_signal_new ("closed", t, G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET (GdkPixbufLoaderClass, closed), nullptr, nullptr, nullptr,
+                G_TYPE_NONE, 0);
+}
+
+/* the header read: tell the size (handlers may ask for another) */
+static void loader_probe (GdkPixbufLoader *l)
+{
+  LoaderData *d = ld (l);
+  if (d->size_known) return;
+  QBuffer buf (&d->data);
+  buf.open (QIODevice::ReadOnly);
+  QImageReader reader (&buf, d->format);
+  QSize s = reader.size ();
+  if (!s.isValid ()) return;
+  d->size_known = true;
+  if (d->format.isEmpty ()) d->format = reader.format ();
+  d->fmt = format_named (reader.format ());
+  g_signal_emit_by_name (l, "size-prepared", s.width (), s.height ());
+}
+
+/* final: the data is complete (close). Earlier decodes (a program asking
+ * for the pixbuf while data still comes) are redone then, into the same
+ * pixbuf object, as gdk-pixbuf fills its pixbuf in place */
+static bool loader_decode (GdkPixbufLoader *l, QString *why, bool final)
+{
+  LoaderData *d = ld (l);
+  if (d->decoded) return true;
+  QBuffer buf (&d->data);
+  buf.open (QIODevice::ReadOnly);
+  GdkPixbufAnimation *a = animation_read (&buf, d->format, d->request, why);
+  if (!a) return false;
+  bool first_time = !d->anim;
+  if (d->anim) {
+    /* keep the pixbuf programs hold */
+    *d->anim->frames = *a->frames;
+    *img_of (d->anim->static_image) = *img_of (a->static_image);
+    d->anim->loops = a->loops;
+    g_object_unref (a);
+  } else {
+    d->anim = a;
+  }
+  d->decoded = final;
+  if (!d->fmt) {
+    QBuffer b2 (&d->data);
+    b2.open (QIODevice::ReadOnly);
+    d->fmt = format_named (QImageReader (&b2).format ());
+  }
+  QImage &img = d->anim->frames->first ().image;
+  if (first_time) g_signal_emit_by_name (l, "area-prepared");
+  g_signal_emit_by_name (l, "area-updated", 0, 0, img.width (), img.height ());
+  return true;
+}
+
+extern "C" {
+
+GSList *gdk_pixbuf_get_formats (void)
+{
+  GSList *l = nullptr;
+  for (GdkPixbufFormat *f : pixbuf_formats ()) l = g_slist_append (l, f);
+  return l;
+}
+
+GdkPixbufFormat *gdk_pixbuf_get_file_info (const gchar *filename, gint *width, gint *height)
+{
+  QImageReader reader (QString::fromLocal8Bit (filename));
+  QSize s = reader.size ();
+  if (!s.isValid () && reader.canRead ()) s = reader.read ().size ();
+  if (!s.isValid ()) return nullptr;
+  if (width) *width = s.width ();
+  if (height) *height = s.height ();
+  return format_named (reader.format ());
+}
+
+gchar *gdk_pixbuf_format_get_name (GdkPixbufFormat *f) { return f ? g_strdup (f->name.constData ()) : nullptr; }
+gchar *gdk_pixbuf_format_get_description (GdkPixbufFormat *f) { return f ? g_strdup (f->description.constData ()) : nullptr; }
+gchar **gdk_pixbuf_format_get_mime_types (GdkPixbufFormat *f) { return f ? strv_of (f->mime_types) : nullptr; }
+gchar **gdk_pixbuf_format_get_extensions (GdkPixbufFormat *f) { return f ? strv_of (f->extensions) : nullptr; }
+gboolean gdk_pixbuf_format_is_writable (GdkPixbufFormat *f) { return f && f->writable; }
+gboolean gdk_pixbuf_format_is_scalable (GdkPixbufFormat *f) { return f && f->scalable; }
+gboolean gdk_pixbuf_format_is_disabled (GdkPixbufFormat *f) { return f && f->disabled; }
+void gdk_pixbuf_format_set_disabled (GdkPixbufFormat *f, gboolean disabled) { if (f) f->disabled = disabled; }
+gchar *gdk_pixbuf_format_get_license (GdkPixbufFormat *f) { return f ? g_strdup ("LGPL") : nullptr; }
+GdkPixbufFormat *gdk_pixbuf_format_copy (const GdkPixbufFormat *f) { return f ? new GdkPixbufFormat (*f) : nullptr; }
+/* the list's formats are the library's: only copies are freed */
+void gdk_pixbuf_format_free (GdkPixbufFormat *f) { if (f && !pixbuf_formats ().contains (f)) delete f; }
+
+/* ---------- animations ---------- */
+GdkPixbufAnimation *gdk_pixbuf_animation_new_from_file (const char *filename, GError **error)
+{
+  QFile file (QString::fromLocal8Bit (filename));
+  if (!file.open (QIODevice::ReadOnly)) {
+    g_set_error (error, G_FILE_ERROR, G_FILE_ERROR_NOENT, "Failed to open file '%s': No such file or directory", filename);
+    return nullptr;
+  }
+  QString why;
+  GdkPixbufAnimation *a = animation_read (&file, QByteArray (), QSize (), &why);
+  if (!a) g_set_error (error, GDK_PIXBUF_ERROR, GDK_PIXBUF_ERROR_UNKNOWN_TYPE, "Couldn't recognize the image file format for file '%s'", filename);
+  return a;
+}
+
+GdkPixbufAnimation *gdk_pixbuf_animation_new_from_resource (const char *path, GError **error)
+{
+  GBytes *bytes = g_resources_lookup_data (path, G_RESOURCE_LOOKUP_FLAGS_NONE, error);
+  if (!bytes) return nullptr;
+  gsize n;
+  QByteArray data ((const char *) g_bytes_get_data (bytes, &n), (int) n);
+  g_bytes_unref (bytes);
+  QBuffer buf (&data);
+  buf.open (QIODevice::ReadOnly);
+  GdkPixbufAnimation *a = animation_read (&buf, QByteArray (), QSize (), nullptr);
+  if (!a) g_set_error (error, GDK_PIXBUF_ERROR, GDK_PIXBUF_ERROR_UNKNOWN_TYPE, "Couldn't recognize the image format of '%s'", path);
+  return a;
+}
+
+GdkPixbufAnimation *gdk_pixbuf_animation_ref (GdkPixbufAnimation *a) { return (GdkPixbufAnimation *) g_object_ref (a); }
+void gdk_pixbuf_animation_unref (GdkPixbufAnimation *a) { g_object_unref (a); }
+int gdk_pixbuf_animation_get_width (GdkPixbufAnimation *a) { return a->frames->first ().image.width (); }
+int gdk_pixbuf_animation_get_height (GdkPixbufAnimation *a) { return a->frames->first ().image.height (); }
+gboolean gdk_pixbuf_animation_is_static_image (GdkPixbufAnimation *a) { return a->frames->size () == 1; }
+GdkPixbuf *gdk_pixbuf_animation_get_static_image (GdkPixbufAnimation *a) { return a->static_image; }
+
+static gint64 timeval_us (const GTimeVal *t) { return t ? (gint64) t->tv_sec * G_USEC_PER_SEC + t->tv_usec : g_get_real_time (); }
+
+GdkPixbufAnimationIter *gdk_pixbuf_animation_get_iter (GdkPixbufAnimation *a, const GTimeVal *start_time)
+{
+  auto *it = (GdkPixbufAnimationIter *) g_object_new (gdk_pixbuf_animation_iter_get_type (), nullptr);
+  it->anim = (GdkPixbufAnimation *) g_object_ref (a);
+  it->start = timeval_us (start_time);
+  return it;
+}
+
+int gdk_pixbuf_animation_iter_get_delay_time (GdkPixbufAnimationIter *it)
+{
+  /* -1: this frame stays (a still image, or the last loop is over) */
+  if (it->anim->frames->size () == 1 || it->frame < 0) return -1;
+  return it->anim->frames->at (it->frame).delay;
+}
+
+GdkPixbuf *gdk_pixbuf_animation_iter_get_pixbuf (GdkPixbufAnimationIter *it)
+{
+  int f = it->frame < 0 ? it->anim->frames->size () - 1 : it->frame;
+  if (!it->pixbuf || g_object_get_data (G_OBJECT (it->pixbuf), "gtkqt-frame") != GINT_TO_POINTER (f + 1)) {
+    if (it->pixbuf) g_object_unref (it->pixbuf);
+    it->pixbuf = gtkqt_pixbuf_from_image (it->anim->frames->at (f).image);
+    g_object_set_data (G_OBJECT (it->pixbuf), "gtkqt-frame", GINT_TO_POINTER (f + 1));
+  }
+  return it->pixbuf;
+}
+
+gboolean gdk_pixbuf_animation_iter_on_currently_loading_frame (GdkPixbufAnimationIter *) { return FALSE; }
+
+gboolean gdk_pixbuf_animation_iter_advance (GdkPixbufAnimationIter *it, const GTimeVal *current_time)
+{
+  const QList<AnimFrame> &fr = *it->anim->frames;
+  if (fr.size () == 1) return FALSE;
+  gint64 total = 0;
+  for (const AnimFrame &f : fr) total += f.delay;
+  gint64 elapsed = qMax<gint64> (0, (timeval_us (current_time) - it->start) / 1000);
+  int old = it->frame, now;
+  if (it->anim->loops > 0 && elapsed >= total * it->anim->loops) now = -1;   /* done: the last frame stays */
+  else {
+    gint64 t = elapsed % qMax<gint64> (1, total);
+    now = 0;
+    while (now < fr.size () - 1 && t >= fr[now].delay) { t -= fr[now].delay; now++; }
+  }
+  it->frame = now;
+  return now != old;
+}
+
+/* ---------- the loader ---------- */
+GdkPixbufLoader *gdk_pixbuf_loader_new (void) { return (GdkPixbufLoader *) g_object_new (gdk_pixbuf_loader_get_type (), nullptr); }
+
+GdkPixbufLoader *gdk_pixbuf_loader_new_with_type (const char *image_type, GError **error)
+{
+  GdkPixbufFormat *f = image_type ? format_named (image_type) : nullptr;
+  if (!f) {
+    g_set_error (error, GDK_PIXBUF_ERROR, GDK_PIXBUF_ERROR_UNKNOWN_TYPE, "Image type '%s' is not supported", image_type ? image_type : "");
+    return nullptr;
+  }
+  GdkPixbufLoader *l = gdk_pixbuf_loader_new ();
+  ld (l)->format = f->extensions.value (0, f->name);
+  ld (l)->fmt = f;
+  return l;
+}
+
+GdkPixbufLoader *gdk_pixbuf_loader_new_with_mime_type (const char *mime_type, GError **error)
+{
+  for (GdkPixbufFormat *f : pixbuf_formats ())
+    if (mime_type && f->mime_types.contains (QByteArray (mime_type))) return gdk_pixbuf_loader_new_with_type (f->name.constData (), error);
+  g_set_error (error, GDK_PIXBUF_ERROR, GDK_PIXBUF_ERROR_UNKNOWN_TYPE, "Image type '%s' is not supported", mime_type ? mime_type : "");
+  return nullptr;
+}
+
+void gdk_pixbuf_loader_set_size (GdkPixbufLoader *l, int width, int height) { ld (l)->request = QSize (width, height); }
+
+gboolean gdk_pixbuf_loader_write (GdkPixbufLoader *l, const guchar *buf, gsize count, GError **error)
+{
+  LoaderData *d = ld (l);
+  if (d->closed) {
+    g_set_error (error, GDK_PIXBUF_ERROR, GDK_PIXBUF_ERROR_FAILED, "The loader is closed");
+    return FALSE;
+  }
+  d->data.append ((const char *) buf, (int) count);
+  loader_probe (l);
+  return TRUE;
+}
+
+gboolean gdk_pixbuf_loader_write_bytes (GdkPixbufLoader *l, GBytes *buffer, GError **error)
+{
+  gsize n;
+  const guchar *p = (const guchar *) g_bytes_get_data (buffer, &n);
+  return gdk_pixbuf_loader_write (l, p, n, error);
+}
+
+gboolean gdk_pixbuf_loader_close (GdkPixbufLoader *l, GError **error)
+{
+  LoaderData *d = ld (l);
+  if (d->closed) return TRUE;
+  d->closed = true;
+  loader_probe (l);
+  QString why;
+  bool ok = loader_decode (l, &why, true);
+  if (!ok)
+    g_set_error (error, GDK_PIXBUF_ERROR, d->data.isEmpty () || !d->size_known ? GDK_PIXBUF_ERROR_UNKNOWN_TYPE : GDK_PIXBUF_ERROR_CORRUPT_IMAGE,
+                 "Couldn't recognize the image file format: %s", why.toUtf8 ().constData ());
+  g_signal_emit_by_name (l, "closed");
+  return ok;
+}
+
+GdkPixbuf *gdk_pixbuf_loader_get_pixbuf (GdkPixbufLoader *l)
+{
+  LoaderData *d = ld (l);
+  /* gdk-pixbuf has a pixbuf once enough data came in; here once it decodes */
+  if (!d->anim && d->size_known && !d->closed) loader_decode (l, nullptr, false);
+  return d->anim ? d->anim->static_image : nullptr;
+}
+
+GdkPixbufAnimation *gdk_pixbuf_loader_get_animation (GdkPixbufLoader *l)
+{
+  if (!ld (l)->anim && ld (l)->size_known && !ld (l)->closed) loader_decode (l, nullptr, false);
+  return ld (l)->anim;
+}
+
+GdkPixbufFormat *gdk_pixbuf_loader_get_format (GdkPixbufLoader *l) { return ld (l)->fmt; }
+
+} /* extern "C" */
+G_GNUC_END_IGNORE_DEPRECATIONS

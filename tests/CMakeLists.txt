@@ -59,3 +59,8 @@ set_tests_properties(galculator PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscree
 gtkqt_add_program(test-sylpheed ${CMAKE_CURRENT_SOURCE_DIR}/test-sylpheed.c 2)
 add_test(NAME sylpheed COMMAND test-sylpheed)
 set_tests_properties(sylpheed PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
+
+# GdkPixbuf's loader, animations, formats; GtkImage playing an animation
+gtkqt_add_program(test-pixbuf ${CMAKE_CURRENT_SOURCE_DIR}/test-pixbuf.c 2)
+add_test(NAME pixbuf COMMAND test-pixbuf)
+set_tests_properties(pixbuf PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
