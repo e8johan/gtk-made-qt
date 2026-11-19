@@ -92,6 +92,24 @@ whose accelerators it saves and loads through the accel map.
 
 ![Sylpheed compose window](docs/screenshots/sylpheed-compose.png)
 
+[Xournal 0.4.8](https://xournal.sourceforge.net/), the GTK 2 note taker and
+PDF annotator, unmodified, on an unmodified libgnomecanvas 2.30 (built
+static against GTK made Qt, with libgail-util). The page is a GnomeCanvas:
+a GtkLayout whose bin_window it draws on from idle handlers, rendering with
+libart into pixbufs on its own memory; text is edited in a GtkTextView put
+on the canvas and sized to its text on "check-resize"; selections go to the
+clipboard as Xournal's own target plus text and image targets; PDF pages
+come from Poppler. Pens, highlighter, eraser, text, selections, copy and
+paste, undo, saving and PDF export all work. Pen tablets reach it through
+GTK 2's extension events (from Qt's tablet events; not yet tried with a
+real tablet).
+
+| Xournal, real GTK 2 | Xournal on GTK made Qt |
+| --- | --- |
+| ![Xournal on GTK 2](docs/screenshots/xournal-gtk2.png) | ![Xournal on Qt](docs/screenshots/xournal-qt.png) |
+
+![Xournal: a selection copied and pasted](docs/screenshots/xournal-select.png)
+
 ## Quick start
 
 ```bash
@@ -156,9 +174,9 @@ cairo, Pango, CMake. GLib, cairo and Pango are plain C libraries, not GTK.
 | --- | --- |
 | Core | GtkWidget (show/hide/destroy, sensitivity, size requests, expand/align, tooltips, focus, accelerators, styles), GtkContainer/GtkBin, GtkWindow, nested `gtk_main`, GdkEvent `*-event` signals, GTK 1/2 public struct fields |
 | GTK 1.2 | GtkType/GtkSignal/GtkArg on GObject, custom widget classes, `gtk-config`/`glib-config`, GtkCList, GtkCTree, GtkList, GtkText, GtkPacker, GtkRuler, GtkCalendar, GtkPixmap, GtkTooltips, GtkColorSelection, GtkFileSelection |
-| Layout | GtkBox/HBox/VBox, GtkButtonBox, GtkGrid, GtkTable, GtkFixed, GtkFrame, GtkAspectFrame, GtkAlignment, GtkEventBox, GtkPaned, GtkNotebook, GtkStack, GtkScrolledWindow, GtkViewport, GtkExpander, GtkHeaderBar, GtkStatusbar |
+| Layout | GtkLayout (bin_window, adjustments, children), GtkBox/HBox/VBox, GtkButtonBox, GtkGrid, GtkTable, GtkFixed, GtkFrame, GtkAspectFrame, GtkAlignment, GtkEventBox, GtkPaned, GtkNotebook, GtkStack, GtkScrolledWindow, GtkViewport, GtkExpander, GtkHeaderBar, GtkStatusbar |
 | Controls | GtkLabel (markup subset), buttons, toggle/check/radio buttons, GtkEntry (GtkEditable signals), GtkSpinButton, combo boxes, GtkCombo, GtkImage, GtkScale, GtkScrollbar, GtkProgressBar (+ GTK 1 GtkProgress), GtkLevelBar, GtkColorButton |
-| Text | GtkTextBuffer/Iter/Mark/Tag with GTK's signal semantics, GtkTextView with border windows and coordinates |
+| Text | GtkTextBuffer/Iter/Mark/Tag with GTK's signal semantics, GtkTextView with border windows and coordinates, GTK 2's GtkTextLayout and GtkTextAttributes |
 | Lists/trees | GtkListStore, GtkTreeStore, GtkTreeView with columns, cell renderers, sorting, editing |
 | Menus | GtkMenuBar, GtkMenu, all item types, GtkItemFactory, GtkUIManager/GtkAction, GMenuModel, GtkMenuButton, GtkPopover, toolbars |
 | Dialogs | GtkDialog (`gtk_dialog_run`), message/about dialogs, file chooser (with extra widgets), GtkFileSelection, GtkFontSelectionDialog, GtkColorSelectionDialog, GTK 4 async dialogs |
@@ -166,11 +184,14 @@ cairo, Pango, CMake. GLib, cairo and Pango are plain C libraries, not GTK.
 | Application | GtkApplication, GtkApplicationWindow, actions and accelerators |
 | Drawing | GtkDrawingArea (expose-event, draw, GTK 4 draw functions), GdkGC drawing, GdkPixmap, XPM, GdkImage, GdkRGB, GdkFont, GtkStyle, Pango, GTK 4 event controllers |
 | Xlib | X11 headers and `-lX11` for programs that call Xlib next to GDK: X ids of GDK windows (`GDK_WINDOW_XWINDOW`), properties and atoms, window-manager requests (`_NET_WM_STATE`, `_NET_WM_MOVERESIZE`, `_MOTIF_WM_HINTS` ...), GCs and drawing, fonts, images, SHAPE |
-| Other | GtkBuilder, GtkSettings, stock items and icon factories, GtkClipboard, drag-and-drop destinations |
+| Images | GdkPixbuf (the whole gdk-pixbuf 2 API on QImage: loading, the incremental loader, animations, formats, scaling and compositing, saving), GtkImage with animations, GtkStatusIcon |
+| Devices | GdkDevice with GTK 2's fields: tablet pens and erasers (pressure, tilt) as extension events, proximity, pointer and keyboard grabs, cursors (pixmap and pixbuf cursors) |
+| Accessibility | GtkAccessible and libgailutil (GailTextUtil, gail_misc) on the real ATK, for libraries such as libgnomecanvas |
+| Other | GtkBuilder, GtkSettings, stock items and icon factories, key bindings, the accel map, GtkClipboard (text, images, program-provided targets, target lists), drag-and-drop destinations, GdkRegion |
 
 Tests: `tests/` (run at all API levels) and every example, headless, via
-ctest. Real programs: Leafpad (GTK 2), XMMS 1.2.11 and the GTK 1.2
-tutorial programs;
+ctest. Real programs: Leafpad, Asunder, Galculator, Sylpheed and Xournal (GTK 2),
+XMMS 1.2.11 and the GTK 1.2 tutorial programs;
 [docs/testing.md](docs/testing.md) explains the comparisons with real GTK.
 
 Layout follows GTK's rules closely enough that windows come out at much the
@@ -185,9 +206,8 @@ same size:
 - CSS and gtkrc styling: programs take the Qt look; a few style classes get a
   rough equivalent.
 - GTK 4 list widgets (GtkListView, GtkColumnView, GtkGridView), GtkListBox,
-  GtkFlowBox, GtkSizeGroup, GtkFontChooser, drag sources, the GTK 4
-  clipboard API, the GTK 1 GtkTree widget.
-- Most of GdkPixbuf.
+  GtkFlowBox, GtkFontChooser, drag sources, the GTK 4 clipboard API, the
+  GTK 1 GtkTree widget.
 - Text offsets are UTF-16 positions (only differs from GTK for characters
   outside the Basic Multilingual Plane).
 

@@ -139,6 +139,35 @@ Things that cost time once; check here before debugging something similar.
   XDG data directories, and pick an installed theme when the platform has
   none (SVG themes need Qt's SVG plugin).
 
+## Xournal and libgnomecanvas (GTK 2)
+
+- QAbstractScrollArea hands its viewport's paint events to the area's own
+  `paintEvent`: a viewport subclass's `paintEvent` never runs. GtkLayout's
+  area forwards them.
+- The area also ignores the viewport's mouse events, and Qt then delivers
+  them again to the area in its own coordinates: every motion came twice,
+  1px apart (the frame), and strokes came out as sawtooth. The area accepts
+  them, as a GTK window consumes its pointer events.
+- `gdk_pixbuf_new_from_data` wraps the caller's memory and GnomeCanvas
+  composites into the canvas buffer through it: anything that writes a
+  pixbuf must write into its pixels, never replace the QImage.
+- GtkTextView defaults to `GTK_WRAP_NONE` and, outside a scrolled window,
+  has no frame or scroll bars and asks for its text's size. With Qt's
+  wrapping default, Xournal's "check-resize" handler (width + a margin)
+  grew the text box forever.
+- `gtk_widget_set_size_request` queues a resize (and "check-resize") only
+  when the request changes, or handlers that set it again never stop.
+- A layout child is allocated its requisition: the size request where one
+  is set, otherwise its natural size - not the larger of the two.
+- `gtk_radio_button_set_group` makes the button inactive when the group
+  has members; the group's active button stays active.
+- `gtk_object_destroy` on canvas items (GtkObjects that are not widgets)
+  must not become `gtk_widget_destroy`.
+- The library is compiled at API level 3, so functions only GTK 1/2
+  headers declare get hidden visibility: the shared build exports them
+  explicitly. Compare `nm` of the archive and the shared library after
+  adding API.
+
 ## Implementation pitfalls
 
 - Static functions in an `extern "C"` block have C linkage: their forward

@@ -142,6 +142,25 @@ typedef enum {
   GTK_SCROLL_PAGE_UP, GTK_SCROLL_PAGE_DOWN, GTK_SCROLL_STEP_LEFT, GTK_SCROLL_STEP_RIGHT,
   GTK_SCROLL_PAGE_LEFT, GTK_SCROLL_PAGE_RIGHT, GTK_SCROLL_START, GTK_SCROLL_END
 } GtkScrollType;
+GType gtk_scroll_type_get_type (void) G_GNUC_CONST;
+#define GTK_TYPE_SCROLL_TYPE (gtk_scroll_type_get_type ())
+
+/* GtkDeleteType ("delete-from-cursor") */
+typedef enum {
+  GTK_DELETE_CHARS, GTK_DELETE_WORD_ENDS, GTK_DELETE_WORDS, GTK_DELETE_DISPLAY_LINES, GTK_DELETE_DISPLAY_LINE_ENDS,
+  GTK_DELETE_PARAGRAPH_ENDS, GTK_DELETE_PARAGRAPHS, GTK_DELETE_WHITESPACE
+} GtkDeleteType;
+
+/* GtkDirectionType (focus movement) */
+typedef enum {
+  GTK_DIR_TAB_FORWARD, GTK_DIR_TAB_BACKWARD, GTK_DIR_UP, GTK_DIR_DOWN, GTK_DIR_LEFT, GTK_DIR_RIGHT
+} GtkDirectionType;
+GType gtk_direction_type_get_type (void) G_GNUC_CONST;
+GType gtk_delete_type_get_type (void) G_GNUC_CONST;
+GType gtk_movement_step_get_type (void) G_GNUC_CONST;
+#define GTK_TYPE_DIRECTION_TYPE (gtk_direction_type_get_type ())
+#define GTK_TYPE_DELETE_TYPE    (gtk_delete_type_get_type ())
+#define GTK_TYPE_MOVEMENT_STEP  (gtk_movement_step_get_type ())
 
 /* GtkMovementStep ("move-cursor" of text and tree views) */
 typedef enum {

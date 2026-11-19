@@ -214,9 +214,14 @@ static QObject *scale_create (GtkWidget *w)
   return qw;
 }
 
+static thread_local QScrollBar *adopt_scrollbar;   /* gtkqt_scrollbar_wrap */
+static thread_local GtkAdjustment *adopt_adjustment;
+
 static QObject *scrollbar_create (GtkWidget *w)
 {
-  auto *sb = new QScrollBar (GTK_IS_VSCROLLBAR (w) ? Qt::Vertical : Qt::Horizontal);
+  QScrollBar *sb = adopt_scrollbar;
+  adopt_scrollbar = nullptr;
+  if (!sb) sb = new QScrollBar (GTK_IS_VSCROLLBAR (w) ? Qt::Vertical : Qt::Horizontal);
   range_data (w)->digits = 0;
   range_connect_slider (w, sb);
   return sb;
@@ -252,8 +257,11 @@ static void gtk_range_init (GtkRange *) {}
 static void gtk_range_constructed (GObject *o)
 {
   G_OBJECT_CLASS (gtk_range_parent_class)->constructed (o);
-  if (!range_data (GTK_WIDGET (o))->adj)
-    gtk_range_set_adjustment (GTK_RANGE (o), gtk_adjustment_new (0, 0, 100, 1, 10, 0));
+  if (!range_data (GTK_WIDGET (o))->adj) {
+    GtkAdjustment *adj = adopt_adjustment;   /* a wrapped scroll bar keeps its range */
+    adopt_adjustment = nullptr;
+    gtk_range_set_adjustment (GTK_RANGE (o), adj ? adj : gtk_adjustment_new (0, 0, 100, 1, 10, 0));
+  }
 }
 static void gtk_range_dispose (GObject *o)
 {
@@ -425,6 +433,30 @@ GtkWidget *gtk_scrollbar_new (GtkOrientation orientation, GtkAdjustment *adjustm
                                      "adjustment", adjustment, nullptr);
 }
 
+} /* extern "C" */
+
+/* a GtkScrollbar on a QScrollBar Qt made (a scroll area's), on adjustment;
+   it lives as long as the QScrollBar, with parent as its GTK parent */
+GtkWidget *gtkqt_scrollbar_wrap (QScrollBar *sb, GtkAdjustment *adjustment, GtkWidget *parent)
+{
+  if (!sb) return nullptr;
+  if (GtkWidget *w = gtkqt_from_qobject (sb))
+    if (GTK_IS_SCROLLBAR (w) && gtkqt_obj (w) == sb) return w;
+  gtkqt_ensure_app ();
+  GType t = sb->orientation () == Qt::Vertical ? GTK_TYPE_VSCROLLBAR : GTK_TYPE_HSCROLLBAR;
+  adopt_scrollbar = sb;
+  adopt_adjustment = adjustment;
+  auto *w = (GtkWidget *) g_object_ref_sink (g_object_new (t, nullptr));
+  gtkqt_obj (w);
+  adopt_scrollbar = nullptr;
+  adopt_adjustment = nullptr;
+  w->priv->visible = sb->isVisibleTo (sb->parentWidget ());
+  w->parent = parent;
+  QObject::connect (sb, &QObject::destroyed, [w] { w->parent = nullptr; g_object_unref (w); });
+  return w;
+}
+
+extern "C" {
 GtkWidget *gtk_hscrollbar_new (GtkAdjustment *adjustment) { return gtk_scrollbar_new (GTK_ORIENTATION_HORIZONTAL, adjustment); }
 GtkWidget *gtk_vscrollbar_new (GtkAdjustment *adjustment) { return gtk_scrollbar_new (GTK_ORIENTATION_VERTICAL, adjustment); }
 

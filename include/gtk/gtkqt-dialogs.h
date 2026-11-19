@@ -206,6 +206,9 @@ void       gtk_color_button_set_rgba (GtkColorButton *button, const GdkRGBA *rgb
 void       gtk_color_button_get_rgba (GtkColorButton *button, GdkRGBA *rgba);
 void       gtk_color_button_set_title (GtkColorButton *button, const gchar *title);
 void       gtk_color_button_set_use_alpha (GtkColorButton *button, gboolean use_alpha);
+gboolean   gtk_color_button_get_use_alpha (GtkColorButton *button);
+void       gtk_color_button_set_alpha (GtkColorButton *button, guint16 alpha);
+guint16    gtk_color_button_get_alpha (GtkColorButton *button);
 
 /* GtkFontButton (and the GTK 3 GtkFontChooser calls on it): a button
  * naming the font that opens a QFontDialog. Font names are Pango's

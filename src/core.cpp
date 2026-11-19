@@ -20,6 +20,7 @@
 #include <QRegularExpression>
 
 #include <cstdio>
+#include <dlfcn.h>
 #include <cstdlib>
 #include <unistd.h>
 
@@ -64,6 +65,31 @@ GTKQT_ENUM (gdk_window_type_hint_get_type, "GdkWindowTypeHint", EV (GDK_WINDOW_T
             EV (GDK_WINDOW_TYPE_HINT_POPUP_MENU, "popup-menu"), EV (GDK_WINDOW_TYPE_HINT_TOOLTIP, "tooltip"),
             EV (GDK_WINDOW_TYPE_HINT_NOTIFICATION, "notification"), EV (GDK_WINDOW_TYPE_HINT_COMBO, "combo"),
             EV (GDK_WINDOW_TYPE_HINT_DND, "dnd"))
+GTKQT_ENUM (gtk_anchor_type_get_type, "GtkAnchorType", EV (GTK_ANCHOR_CENTER, "center"), EV (GTK_ANCHOR_NORTH, "north"),
+            EV (GTK_ANCHOR_NORTH_WEST, "north-west"), EV (GTK_ANCHOR_NORTH_EAST, "north-east"), EV (GTK_ANCHOR_SOUTH, "south"),
+            EV (GTK_ANCHOR_SOUTH_WEST, "south-west"), EV (GTK_ANCHOR_SOUTH_EAST, "south-east"), EV (GTK_ANCHOR_WEST, "west"),
+            EV (GTK_ANCHOR_EAST, "east"))
+GTKQT_ENUM (gdk_line_style_get_type, "GdkLineStyle", EV (GDK_LINE_SOLID, "solid"), EV (GDK_LINE_ON_OFF_DASH, "on-off-dash"),
+            EV (GDK_LINE_DOUBLE_DASH, "double-dash"))
+GTKQT_ENUM (gdk_cap_style_get_type, "GdkCapStyle", EV (GDK_CAP_NOT_LAST, "not-last"), EV (GDK_CAP_BUTT, "butt"),
+            EV (GDK_CAP_ROUND, "round"), EV (GDK_CAP_PROJECTING, "projecting"))
+GTKQT_ENUM (gdk_join_style_get_type, "GdkJoinStyle", EV (GDK_JOIN_MITER, "miter"), EV (GDK_JOIN_ROUND, "round"),
+            EV (GDK_JOIN_BEVEL, "bevel"))
+GTKQT_ENUM (gdk_fill_get_type, "GdkFill", EV (GDK_SOLID, "solid"), EV (GDK_TILED, "tiled"), EV (GDK_STIPPLED, "stippled"),
+            EV (GDK_OPAQUE_STIPPLED, "opaque-stippled"))
+GTKQT_ENUM (gtk_direction_type_get_type, "GtkDirectionType", EV (GTK_DIR_TAB_FORWARD, "tab-forward"),
+            EV (GTK_DIR_TAB_BACKWARD, "tab-backward"), EV (GTK_DIR_UP, "up"), EV (GTK_DIR_DOWN, "down"), EV (GTK_DIR_LEFT, "left"),
+            EV (GTK_DIR_RIGHT, "right"))
+GTKQT_ENUM (gtk_delete_type_get_type, "GtkDeleteType", EV (GTK_DELETE_CHARS, "chars"), EV (GTK_DELETE_WORD_ENDS, "word-ends"),
+            EV (GTK_DELETE_WORDS, "words"), EV (GTK_DELETE_DISPLAY_LINES, "display-lines"),
+            EV (GTK_DELETE_DISPLAY_LINE_ENDS, "display-line-ends"), EV (GTK_DELETE_PARAGRAPH_ENDS, "paragraph-ends"),
+            EV (GTK_DELETE_PARAGRAPHS, "paragraphs"), EV (GTK_DELETE_WHITESPACE, "whitespace"))
+GTKQT_ENUM (gtk_movement_step_get_type, "GtkMovementStep", EV (GTK_MOVEMENT_LOGICAL_POSITIONS, "logical-positions"),
+            EV (GTK_MOVEMENT_VISUAL_POSITIONS, "visual-positions"), EV (GTK_MOVEMENT_WORDS, "words"),
+            EV (GTK_MOVEMENT_DISPLAY_LINES, "display-lines"), EV (GTK_MOVEMENT_DISPLAY_LINE_ENDS, "display-line-ends"),
+            EV (GTK_MOVEMENT_PARAGRAPHS, "paragraphs"), EV (GTK_MOVEMENT_PARAGRAPH_ENDS, "paragraph-ends"),
+            EV (GTK_MOVEMENT_PAGES, "pages"), EV (GTK_MOVEMENT_BUFFER_ENDS, "buffer-ends"),
+            EV (GTK_MOVEMENT_HORIZONTAL_PAGES, "horizontal-pages"))
 GTKQT_ENUM (gtk_arrow_type_get_type, "GtkArrowType", EV (GTK_ARROW_UP, "up"), EV (GTK_ARROW_DOWN, "down"),
             EV (GTK_ARROW_LEFT, "left"), EV (GTK_ARROW_RIGHT, "right"), EV (GTK_ARROW_NONE, "none"))
 GTKQT_ENUM (gtk_shadow_type_get_type, "GtkShadowType", EV (GTK_SHADOW_NONE, "none"), EV (GTK_SHADOW_IN, "in"),
@@ -97,6 +123,16 @@ GTKQT_ENUM (gtk_input_purpose_get_type, "GtkInputPurpose", EV (GTK_INPUT_PURPOSE
             EV (GTK_INPUT_PURPOSE_PASSWORD, "password"), EV (GTK_INPUT_PURPOSE_PIN, "pin"))
 GTKQT_ENUM (gtk_window_type_get_type, "GtkWindowType", EV (GTK_WINDOW_TOPLEVEL, "toplevel"), EV (GTK_WINDOW_POPUP, "popup"))
 GTKQT_ENUM (gtk_pack_type_get_type, "GtkPackType", EV (GTK_PACK_START, "start"), EV (GTK_PACK_END, "end"))
+GTKQT_ENUM (gtk_scroll_type_get_type, "GtkScrollType", EV (GTK_SCROLL_NONE, "none"), EV (GTK_SCROLL_JUMP, "jump"),
+            EV (GTK_SCROLL_STEP_BACKWARD, "step-backward"), EV (GTK_SCROLL_STEP_FORWARD, "step-forward"),
+            EV (GTK_SCROLL_PAGE_BACKWARD, "page-backward"), EV (GTK_SCROLL_PAGE_FORWARD, "page-forward"),
+            EV (GTK_SCROLL_STEP_UP, "step-up"), EV (GTK_SCROLL_STEP_DOWN, "step-down"), EV (GTK_SCROLL_PAGE_UP, "page-up"),
+            EV (GTK_SCROLL_PAGE_DOWN, "page-down"), EV (GTK_SCROLL_STEP_LEFT, "step-left"), EV (GTK_SCROLL_STEP_RIGHT, "step-right"),
+            EV (GTK_SCROLL_PAGE_LEFT, "page-left"), EV (GTK_SCROLL_PAGE_RIGHT, "page-right"), EV (GTK_SCROLL_START, "start"),
+            EV (GTK_SCROLL_END, "end"))
+GTKQT_ENUM (gtk_corner_type_get_type, "GtkCornerType", EV (GTK_CORNER_TOP_LEFT, "top-left"),
+            EV (GTK_CORNER_BOTTOM_LEFT, "bottom-left"), EV (GTK_CORNER_TOP_RIGHT, "top-right"),
+            EV (GTK_CORNER_BOTTOM_RIGHT, "bottom-right"))
 GTKQT_ENUM (gtk_icon_size_get_type, "GtkIconSize", EV (GTK_ICON_SIZE_INVALID, "invalid"), EV (GTK_ICON_SIZE_MENU, "menu"),
             EV (GTK_ICON_SIZE_SMALL_TOOLBAR, "small-toolbar"), EV (GTK_ICON_SIZE_LARGE_TOOLBAR, "large-toolbar"),
             EV (GTK_ICON_SIZE_BUTTON, "button"), EV (GTK_ICON_SIZE_DND, "dnd"), EV (GTK_ICON_SIZE_DIALOG, "dialog"))
@@ -179,6 +215,7 @@ void gtkqt_script_start ();
 static void setup_app ()
 {
   gtkqt_script_start ();
+  gtkqt_devices_init ();
   /* GTK always has its stock icons; where Qt's platform has no icon theme
    * (offscreen, bare window managers) use an installed one */
   {
@@ -624,7 +661,52 @@ enum {
 };
 static guint widget_signals[N_WIDGET_SIGNALS];
 
-G_DEFINE_TYPE (GtkWidget, gtk_widget, G_TYPE_INITIALLY_UNOWNED)
+/* GtkObject (GTK 1/2): the type between GInitiallyUnowned and GtkWidget.
+ * It owns "destroy" (class slot right after GInitiallyUnownedClass, as
+ * GtkWidgetClass's destroy is) and a flags word right after the instance
+ * header (as GtkWidget's flags are). Programs' own objects derive from it:
+ * libgnomecanvas's items set object_class->destroy and chain to it. */
+struct GtkQtObject { GInitiallyUnowned parent_instance; guint32 flags; };
+struct GtkQtObjectClass { GInitiallyUnownedClass parent_class; void (*destroy) (GtkQtObject *object); };
+static_assert (G_STRUCT_OFFSET (GtkQtObjectClass, destroy) == G_STRUCT_OFFSET (GtkWidgetClass, destroy), "destroy slot");
+static_assert (G_STRUCT_OFFSET (GtkQtObject, flags) == G_STRUCT_OFFSET (GtkWidget, flags), "flags word");
+static guint object_destroy_signal;
+static gpointer gtkqt_object_parent_class;
+
+/* widgets run their own destruction (gtk_widget_destroy); other objects
+ * emit "destroy" when disposed, once */
+static void gtkqt_object_dispose (GObject *o)
+{
+  auto *obj = (GtkQtObject *) o;
+  if (!G_TYPE_CHECK_INSTANCE_TYPE (o, gtk_widget_get_type ()) && !(obj->flags & 1)) {
+    obj->flags |= 1;   /* GTK_IN_DESTRUCTION */
+    g_signal_emit (o, object_destroy_signal, 0);
+    obj->flags &= ~1u;
+  }
+  G_OBJECT_CLASS (gtkqt_object_parent_class)->dispose (o);
+}
+
+static void gtkqt_object_real_destroy (GtkQtObject *) {}
+
+static void gtkqt_object_class_init (gpointer klass, gpointer)
+{
+  gtkqt_object_parent_class = g_type_class_peek_parent (klass);
+  G_OBJECT_CLASS (klass)->dispose = gtkqt_object_dispose;
+  static_cast<GtkQtObjectClass *> (klass)->destroy = gtkqt_object_real_destroy;
+  object_destroy_signal = g_signal_new ("destroy", G_TYPE_FROM_CLASS (klass),
+                                        (GSignalFlags) (G_SIGNAL_RUN_CLEANUP | G_SIGNAL_NO_RECURSE | G_SIGNAL_NO_HOOKS),
+                                        G_STRUCT_OFFSET (GtkQtObjectClass, destroy), nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
+}
+
+extern "C" GType gtk_object_get_type (void)
+{
+  static GType t = g_type_register_static_simple (G_TYPE_INITIALLY_UNOWNED, g_intern_static_string ("GtkObject"),
+                                                  sizeof (GtkQtObjectClass), gtkqt_object_class_init, sizeof (GtkQtObject),
+                                                  nullptr, G_TYPE_FLAG_ABSTRACT);
+  return t;
+}
+
+G_DEFINE_TYPE (GtkWidget, gtk_widget, gtk_object_get_type ())
 
 GtkWidgetPrivate *gtkqt_priv (GtkWidget *w) { return w->priv; }
 
@@ -724,7 +806,12 @@ void gtkqt_sync_visible (GtkWidget *w)
   if (!o) return;
   bool vis = w->priv->visible;
   if (auto *va = qobject_cast<QAction *> (o->property ("_gtkqt_vis_action").value<QObject *> ())) {
-    va->setVisible (vis);   /* widgets inside a QToolBar are shown/hidden through their action */
+    /* widgets inside a QToolBar are shown/hidden through their action;
+       tool items can be hidden in one orientation (visible-horizontal/vertical) */
+    if (auto *tb = qobject_cast<QToolBar *> (va->parent ()))
+      if (g_object_get_data (G_OBJECT (w), tb->orientation () == Qt::Vertical ? "gtkqt-hide-vertical" : "gtkqt-hide-horizontal"))
+        vis = false;
+    va->setVisible (vis);
     return;
   }
   if (QWidget *qw = qobject_cast<QWidget *> (o)) {
@@ -852,8 +939,7 @@ static void gtk_widget_class_init (GtkWidgetClass *klass)
     return g_signal_new (name, t, G_SIGNAL_RUN_LAST, offset, g_signal_accumulator_true_handled, nullptr, nullptr,
                          G_TYPE_BOOLEAN, 1, arg);
   };
-  widget_signals[SIG_DESTROY] = sig0 ("destroy", G_STRUCT_OFFSET (GtkWidgetClass, destroy),
-                                      (GSignalFlags) (G_SIGNAL_RUN_CLEANUP | G_SIGNAL_NO_RECURSE | G_SIGNAL_NO_HOOKS));
+  widget_signals[SIG_DESTROY] = object_destroy_signal;   /* GtkObject's, the same class slot */
   widget_signals[SIG_SHOW] = sig0 ("show", G_STRUCT_OFFSET (GtkWidgetClass, show), G_SIGNAL_RUN_FIRST);
   widget_signals[SIG_HIDE] = sig0 ("hide", G_STRUCT_OFFSET (GtkWidgetClass, hide), G_SIGNAL_RUN_FIRST);
   widget_signals[SIG_MAP] = sig0 ("map", G_STRUCT_OFFSET (GtkWidgetClass, map), G_SIGNAL_RUN_FIRST);
@@ -885,6 +971,8 @@ static void gtk_widget_class_init (GtkWidgetClass *klass)
   widget_signals[SIG_CONFIGURE] = sigev ("configure-event", G_STRUCT_OFFSET (GtkWidgetClass, configure_event));
   sigev ("window-state-event", 0);
   sigev ("map-event", 0);
+  sigev ("proximity-in-event", 0);
+  sigev ("proximity-out-event", 0);
   /* GTK 2: handlers may change the requisition; Qt lays out by size hints */
   g_signal_new ("size-request", t, G_SIGNAL_RUN_FIRST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 1, G_TYPE_POINTER);
   sigev ("unmap-event", 0);
@@ -1107,7 +1195,7 @@ bool GtkQtBridge::eventFilter (QObject *watched, QEvent *e)
     if (!sa || watched != sa->viewport ()) return false;
     switch (e->type ()) {
     case QEvent::MouseButtonPress: case QEvent::MouseButtonRelease: case QEvent::MouseButtonDblClick:
-    case QEvent::MouseMove: break;
+    case QEvent::MouseMove: case QEvent::TabletPress: case QEvent::TabletMove: case QEvent::TabletRelease: break;
     case QEvent::Resize:
       /* scroll bars coming and going change what a scrolled list or text is
        * given (update_allocation): GTK allocates it again */
@@ -1178,9 +1266,10 @@ bool GtkQtBridge::eventFilter (QObject *watched, QEvent *e)
 #endif
     ev.button.type = e->type () == QEvent::MouseButtonRelease ? GDK_BUTTON_RELEASE : GDK_BUTTON_PRESS;
     ev.button.window = evwin;
+    ev.button.device = gtkqt_core_pointer ();
     ev.button.time = me->timestamp ();
-    ev.button.x = lp.x ();
-    ev.button.y = lp.y ();
+    ev.button.x = lp.x () - (evwin ? evwin->origin_x : 0);
+    ev.button.y = lp.y () - (evwin ? evwin->origin_y : 0);
     ev.button.x_root = gp.x ();
     ev.button.y_root = gp.y ();
     ev.button.button = me->button () == Qt::RightButton ? 3 : me->button () == Qt::MiddleButton ? 2 : 1;
@@ -1202,9 +1291,10 @@ bool GtkQtBridge::eventFilter (QObject *watched, QEvent *e)
 #endif
     ev.motion.type = GDK_MOTION_NOTIFY;
     ev.motion.window = evwin;
+    ev.motion.device = gtkqt_core_pointer ();
     ev.motion.time = me->timestamp ();
-    ev.motion.x = lp.x ();
-    ev.motion.y = lp.y ();
+    ev.motion.x = lp.x () - (evwin ? evwin->origin_x : 0);
+    ev.motion.y = lp.y () - (evwin ? evwin->origin_y : 0);
     ev.motion.x_root = gp.x ();
     ev.motion.y_root = gp.y ();
     ev.motion.state = gtkqt_qt_mods_to_gdk (me->modifiers (), me->buttons ());
@@ -1215,6 +1305,7 @@ bool GtkQtBridge::eventFilter (QObject *watched, QEvent *e)
     QPoint d = we->angleDelta ();
     ev.scroll.type = GDK_SCROLL;
     ev.scroll.window = w->window;
+    ev.scroll.device = gtkqt_core_pointer ();
     ev.scroll.time = we->timestamp ();
 #if QT_VERSION >= QT_VERSION_CHECK (6, 0, 0)
     ev.scroll.x = we->position ().x ();
@@ -1251,6 +1342,11 @@ bool GtkQtBridge::eventFilter (QObject *watched, QEvent *e)
       handled = gtkqt_bindings_activate (w, ev.key.keyval, ev.key.state);
     return handled;
   }
+  case QEvent::TabletPress:
+  case QEvent::TabletMove:
+  case QEvent::TabletRelease:
+    /* widgets that asked for extension events get the tool's events */
+    return gtkqt_tablet_event (w, qw, static_cast<QTabletEvent *> (e), evwin);
   case QEvent::WindowStateChange: {
     if (!qw->isWindow ()) return false;
     auto gdk_state = [] (Qt::WindowStates s, bool active) {
@@ -1420,9 +1516,14 @@ gboolean gtk_widget_is_sensitive (GtkWidget *widget)
 
 void gtk_widget_set_size_request (GtkWidget *widget, gint width, gint height)
 {
+  bool changed = widget->priv->width_request != width || widget->priv->height_request != height;
   widget->priv->width_request = width;
   widget->priv->height_request = height;
   gtkqt_apply_size_request (widget);
+  if (changed) {
+    if (QWidget *qw = gtkqt_qw (widget)) qw->updateGeometry ();   /* containers placing by request (GtkLayout) follow */
+    gtkqt_queue_check_resize (widget);
+  }
 }
 
 void gtk_widget_get_size_request (GtkWidget *widget, gint *width, gint *height)
@@ -1448,6 +1549,29 @@ void gtk_widget_get_preferred_size (GtkWidget *widget, GtkRequisition *minimum, 
   QSize mn = qw ? qw->minimumSizeHint () : QSize (), nat = qw ? qw->sizeHint () : QSize ();
   if (minimum) { minimum->width = mn.width (); minimum->height = mn.height (); }
   if (natural) { natural->width = nat.width (); natural->height = nat.height (); }
+}
+
+void gtk_widget_set_direction (GtkWidget *widget, GtkTextDirection dir)
+{
+  if (QWidget *qw = gtkqt_qw (widget)) {
+    if (dir == GTK_TEXT_DIR_NONE) qw->unsetLayoutDirection ();
+    else qw->setLayoutDirection (dir == GTK_TEXT_DIR_RTL ? Qt::RightToLeft : Qt::LeftToRight);
+  }
+}
+GtkTextDirection gtk_widget_get_direction (GtkWidget *widget)
+{
+  QWidget *qw = widget ? gtkqt_qw (widget) : nullptr;
+  Qt::LayoutDirection d = qw ? qw->layoutDirection () : QGuiApplication::layoutDirection ();
+  return d == Qt::RightToLeft ? GTK_TEXT_DIR_RTL : GTK_TEXT_DIR_LTR;
+}
+void gtk_widget_set_default_direction (GtkTextDirection dir)
+{
+  gtkqt_ensure_app ();
+  QGuiApplication::setLayoutDirection (dir == GTK_TEXT_DIR_RTL ? Qt::RightToLeft : Qt::LeftToRight);
+}
+GtkTextDirection gtk_widget_get_default_direction (void)
+{
+  return QGuiApplication::layoutDirection () == Qt::RightToLeft ? GTK_TEXT_DIR_RTL : GTK_TEXT_DIR_LTR;
 }
 
 void gtk_widget_get_allocation (GtkWidget *widget, GtkAllocation *allocation)
@@ -1591,6 +1715,7 @@ void gtk_widget_queue_draw_area (GtkWidget *widget, gint x, gint y, gint width, 
 void gtk_widget_queue_resize (GtkWidget *widget)
 {
   if (QWidget *qw = gtkqt_qw (widget)) qw->updateGeometry ();
+  gtkqt_queue_check_resize (widget);
 }
 
 void gtk_widget_queue_allocate (GtkWidget *widget) { gtk_widget_queue_resize (widget); }
@@ -1615,9 +1740,18 @@ gboolean gtk_widget_get_focusable (GtkWidget *widget) { return gtk_widget_get_ca
 
 void gtk_widget_set_focus_on_click (GtkWidget *widget, gboolean focus_on_click)
 {
-  if (QWidget *qw = gtkqt_qw (widget))
-    if (!focus_on_click) qw->setFocusPolicy (Qt::TabFocus);
+  g_object_set_data (G_OBJECT (widget), "gtkqt-no-click-focus", GINT_TO_POINTER (!focus_on_click));
+  QWidget *qw = gtkqt_qw (widget);
+  if (!qw) return;
+  if (!focus_on_click && (qw->focusPolicy () & Qt::ClickFocus)) qw->setFocusPolicy (Qt::TabFocus);
+  else if (focus_on_click && qw->focusPolicy () == Qt::TabFocus) qw->setFocusPolicy (Qt::StrongFocus);
 }
+gboolean gtk_widget_get_focus_on_click (GtkWidget *widget) { return !g_object_get_data (G_OBJECT (widget), "gtkqt-no-click-focus"); }
+/* GTK 2.4 - 3.x spellings */
+void gtk_button_set_focus_on_click (GtkButton *button, gboolean focus_on_click) { gtk_widget_set_focus_on_click (GTK_WIDGET (button), focus_on_click); }
+gboolean gtk_button_get_focus_on_click (GtkButton *button) { return gtk_widget_get_focus_on_click (GTK_WIDGET (button)); }
+void gtk_combo_box_set_focus_on_click (GtkComboBox *combo, gboolean focus_on_click) { gtk_widget_set_focus_on_click (GTK_WIDGET (combo), focus_on_click); }
+gboolean gtk_combo_box_get_focus_on_click (GtkComboBox *combo) { return gtk_widget_get_focus_on_click (GTK_WIDGET (combo)); }
 
 gboolean gtk_widget_has_focus (GtkWidget *widget) { QWidget *qw = gtkqt_qw (widget); return qw && qw->hasFocus (); }
 gboolean gtk_widget_is_focus (GtkWidget *widget) { return gtk_widget_has_focus (widget); }
@@ -1944,7 +2078,7 @@ void gtk_css_provider_load_from_resource (GtkCssProvider *, const char *) {}
 /* ======================================================================
  * GtkContainer / GtkBin
  * ====================================================================== */
-enum { SIG_ADD, SIG_REMOVE, N_CONTAINER_SIGNALS };
+enum { SIG_ADD, SIG_REMOVE, SIG_CHECK_RESIZE, N_CONTAINER_SIGNALS };
 static guint container_signals[N_CONTAINER_SIGNALS];
 
 G_DEFINE_TYPE (GtkContainer, gtk_container, GTK_TYPE_WIDGET)
@@ -2100,6 +2234,8 @@ static void gtk_container_class_init (GtkContainerClass *klass)
                                              nullptr, nullptr, nullptr, G_TYPE_NONE, 1, GTK_TYPE_WIDGET);
   container_signals[SIG_REMOVE] = g_signal_new ("remove", t, G_SIGNAL_RUN_FIRST, G_STRUCT_OFFSET (GtkContainerClass, remove),
                                                 nullptr, nullptr, nullptr, G_TYPE_NONE, 1, GTK_TYPE_WIDGET);
+  /* emitted on the toplevel once size requests below it changed */
+  container_signals[SIG_CHECK_RESIZE] = g_signal_new ("check-resize", t, G_SIGNAL_RUN_LAST, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
   gtkqt_prop (klass, g_param_spec_uint ("border-width", nullptr, nullptr, 0, 65535, 0, RW),
               [] (GObject *o, const GValue *v) { gtk_container_set_border_width (GTK_CONTAINER (o), g_value_get_uint (v)); },
               [] (GObject *o, GValue *v) { g_value_set_uint (v, GTK_CONTAINER (o)->border_width); });
@@ -2229,7 +2365,30 @@ void gtk_container_child_set (GtkContainer *container, GtkWidget *child, const g
 }
 
 void gtk_container_resize_children (GtkContainer *) {}
-void gtk_container_check_resize (GtkContainer *) {}
+void gtk_container_check_resize (GtkContainer *container)
+{
+  if (container) g_signal_emit (container, container_signals[SIG_CHECK_RESIZE], 0);
+}
+
+} /* extern "C" */
+
+/* GTK resizes in an idle after size requests change and emits
+   "check-resize" on the toplevel then; one emission for many requests */
+void gtkqt_queue_check_resize (GtkWidget *w)
+{
+  GtkWidget *top = w ? gtk_widget_get_toplevel (w) : nullptr;
+  if (!top || !GTK_IS_CONTAINER (top) || top->priv->destroyed) return;
+  if (g_object_get_data (G_OBJECT (top), "gtkqt-check-resize")) return;
+  g_object_set_data (G_OBJECT (top), "gtkqt-check-resize", GINT_TO_POINTER (1));
+  g_idle_add_full (G_PRIORITY_HIGH_IDLE + 10, [] (gpointer p) -> gboolean {
+    auto *t = (GtkWidget *) p;
+    g_object_set_data (G_OBJECT (t), "gtkqt-check-resize", nullptr);
+    if (!t->priv->destroyed) gtk_container_check_resize (GTK_CONTAINER (t));
+    return G_SOURCE_REMOVE;
+  }, g_object_ref (top), g_object_unref);
+}
+
+extern "C" {
 GtkWidget *gtk_bin_get_child (GtkBin *bin) { return bin->child; }
 
 } /* extern "C" */
@@ -2238,28 +2397,60 @@ GtkWidget *gtk_bin_get_child (GtkBin *bin) { return bin->child; }
 extern "C" {
 AtkObject *gtk_widget_get_accessible (GtkWidget *widget) { return reinterpret_cast<AtkObject *> (widget); }
 
+/* objects that are not widgets are real ATK objects (programs linked with
+ * libatk through gail.pc): those calls go on to libatk */
+static void *real_atk (const char *name) { return dlsym (RTLD_NEXT, name); }
+static bool is_widget (gpointer a) { return a && G_TYPE_CHECK_INSTANCE_TYPE (a, gtk_widget_get_type ()); }
+
 static void atk_store (AtkObject *a, const char *key, const gchar *value, void (QWidget::*set) (const QString &))
 {
   auto *w = reinterpret_cast<GtkWidget *> (a);
-  if (!w || !GTK_IS_WIDGET (w)) return;
   g_object_set_data_full (G_OBJECT (w), key, g_strdup (value), g_free);
   if (QWidget *qw = gtkqt_qw (w)) (qw->*set) (QString::fromUtf8 (value ? value : ""));
 }
-void atk_object_set_name (AtkObject *a, const gchar *name) { atk_store (a, "gtkqt-atk-name", name, &QWidget::setAccessibleName); }
-void atk_object_set_description (AtkObject *a, const gchar *d) { atk_store (a, "gtkqt-atk-description", d, &QWidget::setAccessibleDescription); }
+void atk_object_set_name (AtkObject *a, const gchar *name)
+{
+  if (is_widget (a)) atk_store (a, "gtkqt-atk-name", name, &QWidget::setAccessibleName);
+  else if (auto f = reinterpret_cast<void (*) (AtkObject *, const gchar *)> (real_atk ("atk_object_set_name"))) f (a, name);
+}
+void atk_object_set_description (AtkObject *a, const gchar *d)
+{
+  if (is_widget (a)) atk_store (a, "gtkqt-atk-description", d, &QWidget::setAccessibleDescription);
+  else if (auto f = reinterpret_cast<void (*) (AtkObject *, const gchar *)> (real_atk ("atk_object_set_description"))) f (a, d);
+}
 const gchar *atk_object_get_name (AtkObject *a)
 {
-  return a && GTK_IS_WIDGET (a) ? (const gchar *) g_object_get_data (G_OBJECT (a), "gtkqt-atk-name") : nullptr;
+  if (is_widget (a)) return (const gchar *) g_object_get_data (G_OBJECT (a), "gtkqt-atk-name");
+  auto f = a ? reinterpret_cast<const gchar *(*) (AtkObject *)> (real_atk ("atk_object_get_name")) : nullptr;
+  return f ? f (a) : nullptr;
 }
 const gchar *atk_object_get_description (AtkObject *a)
 {
-  return a && GTK_IS_WIDGET (a) ? (const gchar *) g_object_get_data (G_OBJECT (a), "gtkqt-atk-description") : nullptr;
+  if (is_widget (a)) return (const gchar *) g_object_get_data (G_OBJECT (a), "gtkqt-atk-description");
+  auto f = a ? reinterpret_cast<const gchar *(*) (AtkObject *)> (real_atk ("atk_object_get_description")) : nullptr;
+  return f ? f (a) : nullptr;
 }
-/* the actions (click, press ...) are Qt's to offer */
-gint atk_action_get_n_actions (AtkAction *) { return 0; }
-const gchar *atk_action_get_name (AtkAction *, gint) { return nullptr; }
-const gchar *atk_action_get_description (AtkAction *, gint) { return nullptr; }
-gboolean atk_action_set_description (AtkAction *, gint, const gchar *) { return FALSE; }
+/* the actions (click, press ...) are Qt's to offer for widgets */
+gint atk_action_get_n_actions (AtkAction *a)
+{
+  auto f = a && !is_widget (a) ? reinterpret_cast<gint (*) (AtkAction *)> (real_atk ("atk_action_get_n_actions")) : nullptr;
+  return f ? f (a) : 0;
+}
+const gchar *atk_action_get_name (AtkAction *a, gint i)
+{
+  auto f = a && !is_widget (a) ? reinterpret_cast<const gchar *(*) (AtkAction *, gint)> (real_atk ("atk_action_get_name")) : nullptr;
+  return f ? f (a, i) : nullptr;
+}
+const gchar *atk_action_get_description (AtkAction *a, gint i)
+{
+  auto f = a && !is_widget (a) ? reinterpret_cast<const gchar *(*) (AtkAction *, gint)> (real_atk ("atk_action_get_description")) : nullptr;
+  return f ? f (a, i) : nullptr;
+}
+gboolean atk_action_set_description (AtkAction *a, gint i, const gchar *d)
+{
+  auto f = a && !is_widget (a) ? reinterpret_cast<gboolean (*) (AtkAction *, gint, const gchar *)> (real_atk ("atk_action_set_description")) : nullptr;
+  return f ? f (a, i, d) : FALSE;
+}
 }
 
 /* ======================================================================

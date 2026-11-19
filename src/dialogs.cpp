@@ -1041,8 +1041,21 @@ static void color_button_paint (GtkWidget *w)
   auto *b = gtkqt_q<QPushButton> (w);
   auto *c = static_cast<QColor *> (g_object_get_data (G_OBJECT (w), "gtkqt-color"));
   if (!b || !c) return;
-  QPixmap pm (32, 16);
-  pm.fill (*c);
+  /* GTK 2's swatch: 20x16 in a thin frame, over a checkerboard where the
+     colour is translucent */
+  QPixmap pm (20, 16);
+  pm.fill (Qt::transparent);
+  {
+    QPainter p (&pm);
+    QRect r (0, 0, 19, 15);
+    if (c->alpha () < 255)
+      for (int y = 0; y < 16; y += 4)
+        for (int x = 0; x < 20; x += 4)
+          p.fillRect (x, y, 4, 4, ((x + y) / 4) % 2 ? QColor (0x99, 0x99, 0x99) : QColor (0x66, 0x66, 0x66));
+    p.fillRect (r, *c);
+    p.setPen (b->palette ().color (QPalette::Dark));
+    p.drawRect (r);
+  }
   b->setIcon (QIcon (pm));
   b->setIconSize (pm.size ());
 }
@@ -1053,7 +1066,9 @@ static QObject *color_button_create (GtkWidget *w)
   gtkqt_connect (w, b, &QPushButton::clicked, [] (GtkWidget *cw, bool) {
     auto *c = static_cast<QColor *> (g_object_get_data (G_OBJECT (cw), "gtkqt-color"));
     auto *title = (const gchar *) g_object_get_data (G_OBJECT (cw), "gtkqt-title");
-    QColor chosen = QColorDialog::getColor (*c, gtkqt_qw (cw), gtkqt_str (title), QColorDialog::ShowAlphaChannel);
+    bool alpha = g_object_get_data (G_OBJECT (cw), "gtkqt-use-alpha");
+    QColor chosen = QColorDialog::getColor (*c, gtkqt_qw (cw), gtkqt_str (title),
+                                           alpha ? QColorDialog::ShowAlphaChannel : QColorDialog::ColorDialogOptions ());
     if (!chosen.isValid ()) return;
     *c = chosen;
     color_button_paint (cw);
@@ -1075,7 +1090,12 @@ static void gtk_color_button_class_init (GtkColorButtonClass *klass)
   gtkqt_prop (klass, g_param_spec_string ("title", nullptr, nullptr, nullptr, RW),
               [] (GObject *o, const GValue *v) { gtk_color_button_set_title (GTK_COLOR_BUTTON (o), g_value_get_string (v)); },
               [] (GObject *o, GValue *v) { g_value_set_string (v, (const gchar *) g_object_get_data (o, "gtkqt-title")); });
-  gtkqt_prop (klass, g_param_spec_boolean ("use-alpha", nullptr, nullptr, FALSE, RW), [] (GObject *, const GValue *) {}, nullptr);
+  gtkqt_prop (klass, g_param_spec_boolean ("use-alpha", nullptr, nullptr, FALSE, RW),
+              [] (GObject *o, const GValue *v) { gtk_color_button_set_use_alpha (GTK_COLOR_BUTTON (o), g_value_get_boolean (v)); },
+              [] (GObject *o, GValue *v) { g_value_set_boolean (v, gtk_color_button_get_use_alpha (GTK_COLOR_BUTTON (o))); });
+  gtkqt_prop (klass, g_param_spec_uint ("alpha", nullptr, nullptr, 0, 65535, 65535, RW),
+              [] (GObject *o, const GValue *v) { gtk_color_button_set_alpha (GTK_COLOR_BUTTON (o), (guint16) g_value_get_uint (v)); },
+              [] (GObject *o, GValue *v) { g_value_set_uint (v, gtk_color_button_get_alpha (GTK_COLOR_BUTTON (o))); });
   gtkqt_prop (klass, g_param_spec_boxed ("rgba", nullptr, nullptr, GDK_TYPE_RGBA, RW),
               [] (GObject *o, const GValue *v) { if (auto *c = (GdkRGBA *) g_value_get_boxed (v)) gtk_color_chooser_set_rgba ((GtkColorChooser *) o, c); },
               [] (GObject *o, GValue *v) { GdkRGBA c; gtk_color_chooser_get_rgba ((GtkColorChooser *) o, &c); g_value_set_boxed (v, &c); });
@@ -1138,7 +1158,23 @@ void gtk_color_button_set_title (GtkColorButton *b, const gchar *title)
 {
   g_object_set_data_full (G_OBJECT (b), "gtkqt-title", g_strdup (title), g_free);
 }
-void gtk_color_button_set_use_alpha (GtkColorButton *, gboolean) {}
+void gtk_color_button_set_use_alpha (GtkColorButton *b, gboolean use_alpha)
+{
+  g_object_set_data (G_OBJECT (b), "gtkqt-use-alpha", GINT_TO_POINTER (use_alpha ? 1 : 0));
+}
+gboolean gtk_color_button_get_use_alpha (GtkColorButton *b) { return g_object_get_data (G_OBJECT (b), "gtkqt-use-alpha") != nullptr; }
+void gtk_color_button_set_alpha (GtkColorButton *b, guint16 alpha)
+{
+  auto *c = static_cast<QColor *> (g_object_get_data (G_OBJECT (b), "gtkqt-color"));
+  if (!c) return;
+  c->setAlphaF (alpha / 65535.0);
+  color_button_paint (GTK_WIDGET (b));
+}
+guint16 gtk_color_button_get_alpha (GtkColorButton *b)
+{
+  auto *c = static_cast<QColor *> (g_object_get_data (G_OBJECT (b), "gtkqt-color"));
+  return c ? (guint16) qRound (c->alphaF () * 65535) : 65535;
+}
 } /* extern "C" */
 
 /* ======================================================================

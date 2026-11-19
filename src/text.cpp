@@ -31,8 +31,10 @@ static void gtk_text_mark_finalize (GObject *o)
 }
 static void gtk_text_mark_class_init (GtkTextMarkClass *klass) { G_OBJECT_CLASS (klass)->finalize = gtk_text_mark_finalize; }
 
-struct _GtkTextTag { GObject parent_instance; gchar *name; gpointer format; gpointer block; };
-typedef struct { GObjectClass parent_class; } GtkTextTagClass;
+typedef struct {
+  GObjectClass parent_class;
+  gboolean (*event) (GtkTextTag *tag, GObject *event_object, GdkEvent *event, const GtkTextIter *iter);
+} GtkTextTagClass;
 G_DEFINE_TYPE (GtkTextTag, gtk_text_tag, G_TYPE_OBJECT)
 
 static QTextCharFormat &tag_fmt (GtkTextTag *t)
@@ -60,6 +62,9 @@ static void gtk_text_tag_init (GtkTextTag *t)
   g_object_set_data (G_OBJECT (t), "gtkqt-tag-id", GINT_TO_POINTER (id));
   tags_by_id.insert (id, t);
   tag_fmt (t).setProperty (TAG_PROPERTY_BASE + id, true);
+  /* GTK 2's public fields: tags are made in priority order */
+  t->priority = id;
+  t->values = gtk_text_attributes_new ();
 }
 static void gtk_text_tag_finalize (GObject *o)
 {
@@ -68,6 +73,7 @@ static void gtk_text_tag_finalize (GObject *o)
   g_free (t->name);
   delete static_cast<QTextCharFormat *> (t->format);
   delete static_cast<QTextBlockFormat *> (t->block);
+  if (t->values) gtk_text_attributes_unref (t->values);
   G_OBJECT_CLASS (gtk_text_tag_parent_class)->finalize (o);
 }
 
@@ -76,6 +82,10 @@ static void gtk_text_tag_finalize (GObject *o)
 static void gtk_text_tag_class_init (GtkTextTagClass *klass)
 {
   G_OBJECT_CLASS (klass)->finalize = gtk_text_tag_finalize;
+  /* events on text the tag is applied to (links: GTK 2 programs connect here) */
+  g_signal_new ("event", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET (GtkTextTagClass, event),
+                g_signal_accumulator_true_handled, nullptr, nullptr, G_TYPE_BOOLEAN, 3, G_TYPE_OBJECT, G_TYPE_POINTER,
+                GTK_TYPE_TEXT_ITER);
   gtkqt_prop (klass, g_param_spec_string ("name", nullptr, nullptr, nullptr, (GParamFlags) (RW | G_PARAM_CONSTRUCT_ONLY)),
               [] (GObject *o, const GValue *v) { auto *t = (GtkTextTag *) o; g_free (t->name); t->name = g_value_dup_string (v); },
               [] (GObject *o, GValue *v) { g_value_set_string (v, ((GtkTextTag *) o)->name); });
@@ -98,7 +108,8 @@ static void gtk_text_tag_class_init (GtkTextTagClass *klass)
   gtkqt_prop (klass, g_param_spec_double ("size-points", nullptr, nullptr, 0, G_MAXDOUBLE, 0, G_PARAM_WRITABLE),
               TAG_SET (f.setFontPointSize (g_value_get_double (v))), nullptr);
   gtkqt_prop (klass, g_param_spec_double ("scale", nullptr, nullptr, 0, G_MAXDOUBLE, 1, G_PARAM_WRITABLE),
-              TAG_SET (f.setFontPointSize (QApplication::font ().pointSizeF () * g_value_get_double (v))), nullptr);
+              TAG_SET (f.setFontPointSize (QApplication::font ().pointSizeF () * g_value_get_double (v));
+                       ((GtkTextTag *) o)->values->font_scale = g_value_get_double (v)), nullptr);
   gtkqt_prop (klass, g_param_spec_string ("family", nullptr, nullptr, nullptr, G_PARAM_WRITABLE),
               TAG_SET (f.setFontFamilies ({ gtkqt_str (g_value_get_string (v)) })), nullptr);
   gtkqt_prop (klass, g_param_spec_string ("font", nullptr, nullptr, nullptr, G_PARAM_WRITABLE),
@@ -188,6 +199,7 @@ struct BufferData {
 
 static BufferData *bd (GtkTextBuffer *b) { return static_cast<BufferData *> (b->priv); }
 static QTextDocument *bdoc (GtkTextBuffer *b) { return bd (b)->doc; }
+QTextDocument *gtkqt_text_buffer_document (GtkTextBuffer *b) { return b ? bdoc (b) : nullptr; }
 static int end_offset (GtkTextBuffer *b) { return qMax (0, bdoc (b)->characterCount () - 1); }
 
 G_DEFINE_TYPE (GtkTextBuffer, gtk_text_buffer, G_TYPE_OBJECT)
@@ -661,12 +673,12 @@ static void real_apply_tag (GtkTextBuffer *b, GtkTextTag *tag, const GtkTextIter
   if (tag->block) c.mergeBlockFormat (tag_block (tag));
   /* tags made later have priority, whatever order they are applied in:
    * merge theirs again where they are */
-  int id = tag_id (tag);
+  int id = tag->priority;
   for (int p = s; p < e;) {
     int q = qMin (next_boundary (b, p), e);
     if (q <= p) break;
     for (GtkTextTag *t : tags_at (b, p))
-      if (tag_id (t) > id) {
+      if (t->priority > id) {
         QTextCursor r (bdoc (b));
         r.setPosition (p);
         r.setPosition (q, QTextCursor::KeepAnchor);
@@ -1094,6 +1106,40 @@ public:
 
   GtkTextView *view () const { return gw && gw->priv && !gw->priv->destroyed ? GTK_TEXT_VIEW (gw) : nullptr; }
 
+  /* in a GtkScrolledWindow the view scrolls; elsewhere GTK gives it the
+     size of its text */
+  bool scrolled () const { return gw && gw->parent && GTK_IS_SCROLLED_WINDOW (gw->parent); }
+  QSize text_size () const
+  {
+    QSizeF doc = document ()->documentLayout ()->documentSize ();
+    qreal w = lineWrapMode () == QTextEdit::NoWrap ? document ()->idealWidth () : doc.width ();
+    return QSize ((int) std::ceil (w), (int) std::ceil (doc.height ()));
+  }
+  QSize sizeHint () const override
+  {
+    if (scrolled ()) return QTextEdit::sizeHint ();
+    QSize t = text_size ();
+    int f = frameWidth () * 2;
+    QMargins m = viewportMargins ();
+    if (lineWrapMode () != QTextEdit::NoWrap) t.setWidth (QTextEdit::sizeHint ().width () - f - m.left () - m.right ());
+    return QSize (t.width () + f + m.left () + m.right (), t.height () + f + m.top () + m.bottom ());
+  }
+  /* GTK 2's width / height fields: the size of the text; a new size is a
+     new size request */
+  void text_size_changed ()
+  {
+    GtkTextView *v = view ();
+    if (!v) return;
+    QSize t = text_size ();
+    if (t.width () == v->width && t.height () == v->height) return;
+    v->width = t.width ();
+    v->height = t.height ();
+    if (!scrolled ()) {
+      updateGeometry ();
+      gtkqt_queue_check_resize (gw);
+    }
+  }
+
   void update_borders (bool vertical, bool horizontal)
   {
     for (int i = 0; i < 4; i++)
@@ -1323,6 +1369,12 @@ static GtkQtTextEdit *text_edit (GtkTextView *v) { return v ? dynamic_cast<GtkQt
 static QObject *text_view_create (GtkWidget *w)
 {
   auto *e = new GtkQtTextEdit (w);
+  /* a GtkTextView has no frame or scroll bars of its own: a scrolled
+     window gives it those (scrolled_apply) */
+  e->setFrameShape (QFrame::NoFrame);
+  e->setHorizontalScrollBarPolicy (Qt::ScrollBarAlwaysOff);
+  e->setVerticalScrollBarPolicy (Qt::ScrollBarAlwaysOff);
+  e->setLineWrapMode (QTextEdit::NoWrap);   /* GTK_WRAP_NONE, GTK's default */
   /* GTK 2's hadjustment / vadjustment fields: the scroll bars' positions */
   auto *v = GTK_TEXT_VIEW (w);
   v->hadjustment = gtkqt_scrollbar_adjustment (G_OBJECT (w), "gtkqt-hadj", e->horizontalScrollBar ());
@@ -1530,8 +1582,12 @@ void gtk_text_view_set_buffer (GtkTextView *view, GtkTextBuffer *buffer)
       iter_init (&it, b, d->insert);
       g_signal_emit_by_name (b, "mark-set", &it, d->insert_mark);
     });
-    if (auto *te = dynamic_cast<GtkQtTextEdit *> (e))
+    if (auto *te = dynamic_cast<GtkQtTextEdit *> (e)) {
       QObject::connect (bdoc (buffer), &QTextDocument::contentsChanged, e, [te] { te->update_borders (true, true); });
+      QObject::connect (bdoc (buffer)->documentLayout (), &QAbstractTextDocumentLayout::documentSizeChanged, e,
+                        [te] { te->text_size_changed (); });
+      te->text_size_changed ();
+    }
   }
   g_object_notify (G_OBJECT (view), "buffer");
 }
@@ -1890,6 +1946,7 @@ gboolean gtk_text_tag_table_add (GtkTextTagTable *table, GtkTextTag *tag)
   auto *tags = table_tags (table);
   if (!tags || !tag || tags->contains (tag_key (tag))) return FALSE;
   tags->insert (tag_key (tag), GTK_TEXT_TAG (g_object_ref (tag)));
+  tag->table = table;
   g_signal_emit_by_name (table, "tag-added", tag);
   return TRUE;
 }
@@ -1951,7 +2008,7 @@ static QList<GtkTextTag *> tags_at (GtkTextBuffer *b, int off)
   for (auto it = props.begin (); it != props.end (); ++it)
     if (it.key () > TAG_PROPERTY_BASE)
       if (GtkTextTag *t = tags_by_id.value (it.key () - TAG_PROPERTY_BASE)) l << t;
-  std::sort (l.begin (), l.end (), [] (GtkTextTag *x, GtkTextTag *y) { return tag_id (x) < tag_id (y); });
+  std::sort (l.begin (), l.end (), [] (GtkTextTag *x, GtkTextTag *y) { return x->priority < y->priority; });
   return l;
 }
 
@@ -2261,4 +2318,97 @@ static void text_view_unplace (GtkContainer *, GtkWidget *child)
   }
   if (QWidget *qw = gtkqt_qw (child)) qw->setParent (nullptr);
 }
+
+/* ======================================================================
+ * GtkTextAttributes, tag priorities and events, cursor positions
+ * ====================================================================== */
+extern "C" {
+
+GtkTextAttributes *gtk_text_attributes_new (void)
+{
+  auto *a = g_new0 (GtkTextAttributes, 1);
+  a->refcount = 1;
+  a->font_scale = 1.0;
+  a->editable = TRUE;
+  a->justification = GTK_JUSTIFY_LEFT;
+  a->direction = GTK_TEXT_DIR_NONE;
+  a->language = pango_language_get_default ();
+  return a;
+}
+
+void gtk_text_attributes_copy_values (GtkTextAttributes *src, GtkTextAttributes *dest)
+{
+  if (!src || !dest || src == dest) return;
+  guint refcount = dest->refcount;
+  if (dest->font) pango_font_description_free (dest->font);
+  if (dest->tabs) pango_tab_array_free (dest->tabs);
+  if (dest->pg_bg_color) gdk_color_free (dest->pg_bg_color);
+  if (dest->appearance.bg_stipple) g_object_unref (dest->appearance.bg_stipple);
+  if (dest->appearance.fg_stipple) g_object_unref (dest->appearance.fg_stipple);
+  *dest = *src;
+  dest->refcount = refcount;
+  dest->realized = FALSE;
+  if (src->font) dest->font = pango_font_description_copy (src->font);
+  if (src->tabs) dest->tabs = pango_tab_array_copy (src->tabs);
+  if (src->pg_bg_color) dest->pg_bg_color = gdk_color_copy (src->pg_bg_color);
+  if (src->appearance.bg_stipple) g_object_ref (src->appearance.bg_stipple);
+  if (src->appearance.fg_stipple) g_object_ref (src->appearance.fg_stipple);
+}
+
+GtkTextAttributes *gtk_text_attributes_copy (GtkTextAttributes *src)
+{
+  GtkTextAttributes *a = gtk_text_attributes_new ();
+  gtk_text_attributes_copy_values (src, a);
+  return a;
+}
+
+GtkTextAttributes *gtk_text_attributes_ref (GtkTextAttributes *a) { if (a) a->refcount++; return a; }
+
+void gtk_text_attributes_unref (GtkTextAttributes *a)
+{
+  if (!a || --a->refcount > 0) return;
+  if (a->font) pango_font_description_free (a->font);
+  if (a->tabs) pango_tab_array_free (a->tabs);
+  if (a->pg_bg_color) gdk_color_free (a->pg_bg_color);
+  if (a->appearance.bg_stipple) g_object_unref (a->appearance.bg_stipple);
+  if (a->appearance.fg_stipple) g_object_unref (a->appearance.fg_stipple);
+  g_free (a);
+}
+
+GType gtk_text_attributes_get_type (void)
+{
+  static GType t = g_boxed_type_register_static ("GtkTextAttributes", (GBoxedCopyFunc) gtk_text_attributes_ref,
+                                                 (GBoxedFreeFunc) gtk_text_attributes_unref);
+  return t;
+}
+
+gint gtk_text_tag_get_priority (GtkTextTag *tag) { return tag->priority; }
+
+/* tags with a higher priority win where they overlap: applied again on top */
+void gtk_text_tag_set_priority (GtkTextTag *tag, gint priority) { tag->priority = priority; }
+
+gboolean gtk_text_tag_event (GtkTextTag *tag, GObject *event_object, GdkEvent *event, const GtkTextIter *iter)
+{
+  gboolean handled = FALSE;
+  g_signal_emit_by_name (tag, "event", event_object, event, iter, &handled);
+  return handled;
+}
+
+gboolean gtk_text_iter_forward_cursor_positions (GtkTextIter *iter, gint count)
+{
+  if (count < 0) return gtk_text_iter_backward_cursor_positions (iter, -count);
+  gboolean moved = FALSE;
+  while (count-- > 0 && gtk_text_iter_forward_cursor_position (iter)) moved = TRUE;
+  return moved && !gtk_text_iter_is_end (iter);
+}
+
+gboolean gtk_text_iter_backward_cursor_positions (GtkTextIter *iter, gint count)
+{
+  if (count < 0) return gtk_text_iter_forward_cursor_positions (iter, -count);
+  gboolean moved = FALSE;
+  while (count-- > 0 && gtk_text_iter_backward_cursor_position (iter)) moved = TRUE;
+  return moved;
+}
+
+} /* extern "C" */
 

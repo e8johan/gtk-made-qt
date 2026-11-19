@@ -153,7 +153,6 @@ void     gtk_signal_handlers_destroy (GtkObject *object);
 #define gtk_object_data_force_id                    g_quark_from_string
 #define gtk_object_weakref(o, f, d)                 g_object_weak_ref (G_OBJECT (o), (GWeakNotify) (f), (d))
 #define gtk_object_weakunref(o, f, d)               g_object_weak_unref (G_OBJECT (o), (GWeakNotify) (f), (d))
-#define gtk_object_get_type()                       GTK_TYPE_OBJECT
 #endif
 
 /* GtkArg (GTK 1 object arguments): "GtkWidget::width" style names are
@@ -329,6 +328,7 @@ typedef enum { GDK_WINDOW_EDGE_NORTH_WEST, GDK_WINDOW_EDGE_NORTH, GDK_WINDOW_EDG
                GDK_WINDOW_EDGE_EAST, GDK_WINDOW_EDGE_SOUTH_WEST, GDK_WINDOW_EDGE_SOUTH, GDK_WINDOW_EDGE_SOUTH_EAST } GdkWindowEdge;
 void       gdk_window_iconify (GdkWindow *window);
 void       gdk_window_deiconify (GdkWindow *window);
+GdkWindowState gdk_window_get_state (GdkWindow *window);
 void       gdk_window_maximize (GdkWindow *window);
 void       gdk_window_unmaximize (GdkWindow *window);
 void       gdk_window_fullscreen (GdkWindow *window);
@@ -362,7 +362,7 @@ gchar     *gdk_get_display (void);
 #define GDK_DECOR_ALL      (1 << 0)
 #define GDK_DECOR_BORDER   (1 << 1)
 #define GDK_DECOR_TITLE    (1 << 3)
-#define GDK_GRAB_SUCCESS   0
+typedef enum { GDK_GRAB_SUCCESS, GDK_GRAB_ALREADY_GRABBED, GDK_GRAB_INVALID_TIME, GDK_GRAB_NOT_VIEWABLE, GDK_GRAB_FROZEN } GdkGrabStatus;
 
 typedef enum { GDK_INPUT_READ = 1 << 0, GDK_INPUT_WRITE = 1 << 1, GDK_INPUT_EXCEPTION = 1 << 2 } GdkInputCondition;
 typedef void (*GdkInputFunction) (gpointer data, gint source, GdkInputCondition condition);
@@ -377,12 +377,26 @@ typedef enum {
   GDK_X_CURSOR = 0, GDK_ARROW = 2, GDK_CROSSHAIR = 34, GDK_FLEUR = 52, GDK_HAND1 = 58, GDK_HAND2 = 60,
   GDK_LEFT_PTR = 68, GDK_QUESTION_ARROW = 92, GDK_SB_H_DOUBLE_ARROW = 108, GDK_SB_V_DOUBLE_ARROW = 116,
   GDK_TOP_LEFT_CORNER = 134, GDK_BOTTOM_RIGHT_CORNER = 14, GDK_WATCH = 150, GDK_XTERM = 152,
-  GDK_PENCIL = 86, GDK_PLUS = 90, GDK_TCROSS = 130, GDK_CIRCLE = 24, GDK_SIZING = 120, GDK_BLANK_CURSOR = -2
+  GDK_PENCIL = 86, GDK_PLUS = 90, GDK_TCROSS = 130, GDK_CIRCLE = 24, GDK_SIZING = 120,
+  GDK_BOTTOM_LEFT_CORNER = 12, GDK_BOTTOM_SIDE = 16, GDK_LEFT_SIDE = 70, GDK_RIGHT_SIDE = 96,
+  GDK_TOP_RIGHT_CORNER = 136, GDK_TOP_SIDE = 138, GDK_DOT = 38, GDK_DOTBOX = 40, GDK_HAND = 58,
+  GDK_SB_UP_ARROW = 114, GDK_SB_DOWN_ARROW = 106, GDK_SB_LEFT_ARROW = 110, GDK_SB_RIGHT_ARROW = 112,
+  GDK_TARGET = 128, GDK_LAST_CURSOR = 153,
+  GDK_BLANK_CURSOR = -2, GDK_CURSOR_IS_PIXMAP = -1
 } GdkCursorType;
+/* public part (GTK 2's GdkCursor); our Qt data follows it */
+struct _GdkCursor { GdkCursorType type; guint ref_count; };
 GdkCursor *gdk_cursor_new (GdkCursorType cursor_type);
 GdkCursor *gdk_cursor_new_from_pixmap (GdkPixmap *source, GdkPixmap *mask, const GdkColor *fg, const GdkColor *bg, gint x, gint y);
 void       gdk_cursor_destroy (GdkCursor *cursor);
-#define    gdk_cursor_unref gdk_cursor_destroy
+GdkCursor *gdk_cursor_ref (GdkCursor *cursor);
+void       gdk_cursor_unref (GdkCursor *cursor);
+GdkCursorType gdk_cursor_get_cursor_type (GdkCursor *cursor);
+GdkCursor *gdk_cursor_new_for_display (GdkDisplay *display, GdkCursorType cursor_type);
+GdkCursor *gdk_cursor_new_from_pixbuf (GdkDisplay *display, GdkPixbuf *pixbuf, gint x, gint y);
+GdkCursor *gdk_cursor_new_from_name (GdkDisplay *display, const gchar *name);
+GdkPixbuf *gdk_cursor_get_image (GdkCursor *cursor);
+GdkDisplay *gdk_cursor_get_display (GdkCursor *cursor);
 
 /* fonts (X font names are matched to system fonts) */
 typedef enum { GDK_FONT_FONT, GDK_FONT_FONTSET } GdkFontType;
@@ -489,6 +503,7 @@ GdkColormap *gdk_rgb_get_cmap (void);
 #define      gdk_rgb_get_colormap gdk_rgb_get_cmap
 gulong       gdk_rgb_xpixel_from_rgb (guint32 rgb);
 void         gdk_rgb_gc_set_foreground (GdkGC *gc, guint32 rgb);
+void         gdk_rgb_find_color (GdkColormap *colormap, GdkColor *color);   /* sets color->pixel */
 void         gdk_rgb_gc_set_background (GdkGC *gc, guint32 rgb);
 void         gdk_rgb_set_install (gboolean install);
 void         gdk_rgb_set_min_colors (gint min_colors);

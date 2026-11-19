@@ -53,6 +53,9 @@ static QWidget *find_widget (const QString &specIn)
     if (spec == "textview") return qobject_cast<QTextEdit *> (w) != nullptr;
     if (spec == "entry") return qobject_cast<QLineEdit *> (w) != nullptr;
     if (spec == "treeview") return qobject_cast<QAbstractItemView *> (w) != nullptr;
+    if (spec == "layout")   /* a GtkLayout (GnomeCanvas ...): a scroll area that is not a list or text */
+      return qobject_cast<QAbstractScrollArea *> (w) && !qobject_cast<QAbstractItemView *> (w) && !qobject_cast<QTextEdit *> (w)
+             && !qobject_cast<QScrollArea *> (w) && !qobject_cast<QPlainTextEdit *> (w);
     if (w == top && (spec == "window" || w->windowTitle () == spec)) return true;
     if (auto *b = qobject_cast<QAbstractButton *> (w)) return plain (b->text ()) == plain (spec);
     if (auto *lb = qobject_cast<QLabel *> (w)) return plain (lb->text ()) == plain (spec);
@@ -203,6 +206,28 @@ static void run_steps (QStringList steps)
         QApplication::sendEvent (target, &press);
         QApplication::sendEvent (target, &release);
       }
+    } else if (cmd == "drag") {
+      /* drag <widget> x0 y0 x1 y1 [button]: press, ten moves, release */
+      QStringList name;
+      while (!a.isEmpty ()) { bool num = false; a.first ().toInt (&num); if (num && !name.isEmpty ()) break; name << a.takeFirst (); }
+      QWidget *t = find_widget (name.join (' '));
+      if (!t || a.size () < 4) { fprintf (stderr, "script: drag: no widget or points: %s\n", qPrintable (name.join (' '))); continue; }
+      if (auto *sa = qobject_cast<QAbstractScrollArea *> (t)) t = sa->viewport ();
+      int bn = a.size () > 4 ? a[4].toInt () : 1;
+      Qt::MouseButton button = bn == 3 ? Qt::RightButton : bn == 2 ? Qt::MiddleButton : Qt::LeftButton;
+      QPointF p0 (a[0].toInt (), a[1].toInt ()), p1 (a[2].toInt (), a[3].toInt ());
+      QPointer<QWidget> target (t);
+      auto send = [target] (QEvent::Type type, QPointF pos, Qt::MouseButton b, Qt::MouseButtons bs) {
+        if (!target) return;
+        QMouseEvent ev (type, pos, target->mapToGlobal (pos), b, bs, Qt::NoModifier);
+        QApplication::sendEvent (target, &ev);
+      };
+      send (QEvent::MouseButtonPress, p0, button, button);
+      for (int i = 1; i <= 10; i++)
+        QTimer::singleShot (i * 20, t, [=] { send (QEvent::MouseMove, p0 + (p1 - p0) * (i / 10.0), Qt::NoButton, button); });
+      QTimer::singleShot (220, t, [=] { send (QEvent::MouseButtonRelease, p1, button, Qt::NoButton); });
+      next (steps, 400);
+      return;
     } else if (cmd == "file") {
       QFileDialog *fd = nullptr;
       GtkWidget *fs1 = nullptr;   /* GTK 1's GtkFileSelection is made of GTK widgets */

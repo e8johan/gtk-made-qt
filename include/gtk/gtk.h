@@ -39,6 +39,7 @@
 #include <gtk/gtkqt-gtk2.h>
 #include <gtk/gtkqt-print.h>
 #include <gtk/gtkqt-gtk1.h>
+#include <gtk/gtkqt-accessible.h>
 #include <gtk/gtkqt-compat.h>
 #ifdef GTKQT_VISIBILITY_PUSHED_GTK
 #pragma GCC visibility pop

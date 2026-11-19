@@ -12,9 +12,67 @@ G_BEGIN_DECLS
 typedef struct _GtkTextBuffer GtkTextBuffer;
 typedef struct _GtkTextBufferClass GtkTextBufferClass;
 typedef struct _GtkTextTag GtkTextTag;
+typedef struct _GtkTextTagTable GtkTextTagTable;
+
+/* GTK 2's GtkTextAttributes: what a tag (or a layout's default style) sets */
+typedef struct _GtkTextAppearance {
+  GdkColor bg_color;
+  GdkColor fg_color;
+  GdkBitmap *bg_stipple;
+  GdkBitmap *fg_stipple;
+  gint rise;
+  gpointer padding1;
+  guint underline : 4;
+  guint strikethrough : 1;
+  guint draw_bg : 1;
+  guint inside_selection : 1;
+  guint is_text : 1;
+  guint pad1 : 1, pad2 : 1, pad3 : 1, pad4 : 1;
+} GtkTextAppearance;
+typedef struct _GtkTextAttributes {
+  guint refcount;
+  GtkTextAppearance appearance;
+  GtkJustification justification;
+  GtkTextDirection direction;
+  PangoFontDescription *font;
+  gdouble font_scale;
+  gint left_margin;
+  gint indent;
+  gint right_margin;
+  gint pixels_above_lines;
+  gint pixels_below_lines;
+  gint pixels_inside_wrap;
+  PangoTabArray *tabs;
+  GtkWrapMode wrap_mode;
+  PangoLanguage *language;
+  GdkColor *pg_bg_color;
+  guint invisible : 1;
+  guint bg_full_height : 1;
+  guint editable : 1;
+  guint realized : 1;
+  guint pad1 : 1, pad2 : 1, pad3 : 1, pad4 : 1;
+} GtkTextAttributes;
+#define GTK_TYPE_TEXT_ATTRIBUTES (gtk_text_attributes_get_type ())
+GType              gtk_text_attributes_get_type (void) G_GNUC_CONST;
+GtkTextAttributes *gtk_text_attributes_new (void);
+GtkTextAttributes *gtk_text_attributes_copy (GtkTextAttributes *src);
+void               gtk_text_attributes_copy_values (GtkTextAttributes *src, GtkTextAttributes *dest);
+void               gtk_text_attributes_unref (GtkTextAttributes *values);
+GtkTextAttributes *gtk_text_attributes_ref (GtkTextAttributes *values);
+
+/* GTK 2's public GtkTextTag fields */
+struct _GtkTextTag {
+  GObject parent_instance;
+  GtkTextTagTable *table;
+  char *name;
+  int priority;
+  GtkTextAttributes *values;   /* what the tag sets */
+  /*< private >*/
+  gpointer format;             /* QTextCharFormat */
+  gpointer block;              /* QTextBlockFormat */
+};
 /* a place in the text where views show a widget of their own */
 typedef struct _GtkTextChildAnchor { GObject parent_instance; gpointer segment; } GtkTextChildAnchor;
-typedef struct _GtkTextTagTable GtkTextTagTable;
 typedef struct _GtkTextMark GtkTextMark;
 typedef struct _GtkIMContext GtkIMContext;
 
@@ -53,6 +111,8 @@ struct _GtkTextBufferClass {
 #define GTK_TYPE_TEXT_ITER    (gtk_text_iter_get_type ())
 GType          gtk_text_buffer_get_type (void) G_GNUC_CONST;
 GType          gtk_text_tag_get_type (void) G_GNUC_CONST;
+gint           gtk_text_tag_get_priority (GtkTextTag *tag);
+void           gtk_text_tag_set_priority (GtkTextTag *tag, gint priority);
 GType          gtk_text_mark_get_type (void) G_GNUC_CONST;
 #define GTK_TYPE_TEXT_MARK    (gtk_text_mark_get_type ())
 GType          gtk_text_iter_get_type (void) G_GNUC_CONST;
@@ -160,6 +220,10 @@ gboolean       gtk_text_iter_starts_word (const GtkTextIter *iter);
 gboolean       gtk_text_iter_ends_word (const GtkTextIter *iter);
 gboolean       gtk_text_iter_inside_word (const GtkTextIter *iter);
 gboolean       gtk_text_iter_is_cursor_position (const GtkTextIter *iter);
+gboolean       gtk_text_iter_forward_cursor_positions (GtkTextIter *iter, gint count);
+gboolean       gtk_text_iter_backward_cursor_positions (GtkTextIter *iter, gint count);
+/* the tag's "event" signal, for events on text it is applied to */
+gboolean       gtk_text_tag_event (GtkTextTag *tag, GObject *event_object, GdkEvent *event, const GtkTextIter *iter);
 /* tags at a position, and where they start and end */
 gboolean       gtk_text_iter_has_tag (const GtkTextIter *iter, GtkTextTag *tag);
 GSList        *gtk_text_iter_get_tags (const GtkTextIter *iter);

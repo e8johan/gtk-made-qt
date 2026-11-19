@@ -222,6 +222,17 @@ typedef struct {
   GdkEventType type;
   GdkWindow *window;
   gint8 send_event;
+  guint32 time;
+  GdkDevice *device;
+} GdkEventProximity;
+typedef enum {
+  GDK_NOTIFY_ANCESTOR, GDK_NOTIFY_VIRTUAL, GDK_NOTIFY_INFERIOR, GDK_NOTIFY_NONLINEAR, GDK_NOTIFY_NONLINEAR_VIRTUAL,
+  GDK_NOTIFY_UNKNOWN
+} GdkNotifyType;
+typedef struct {
+  GdkEventType type;
+  GdkWindow *window;
+  gint8 send_event;
   GdkWindow *subwindow;
   guint32 time;
   gdouble x, y;
@@ -308,6 +319,7 @@ typedef union _GdkEvent {
   GdkEventSelection selection;
   GdkEventVisibility visibility;
   GdkEventWindowState window_state;
+  GdkEventProximity proximity;
 } GdkEvent;
 
 #define GDK_TYPE_EVENT (gdk_event_get_type ())
@@ -363,6 +375,8 @@ gint        gdk_screen_width (void);
 gint        gdk_screen_height (void);
 void        gdk_beep (void);
 void        gdk_flush (void);
+void        gdk_display_sync (GdkDisplay *display);
+void        gdk_display_flush (GdkDisplay *display);
 void        gdk_display_beep (GdkDisplay *display);
 void        gdk_threads_init (void);
 void        gdk_threads_enter (void);
@@ -427,6 +441,57 @@ typedef enum { GDK_SOLID, GDK_TILED, GDK_STIPPLED, GDK_OPAQUE_STIPPLED } GdkFill
 typedef enum { GDK_LINE_SOLID, GDK_LINE_ON_OFF_DASH, GDK_LINE_DOUBLE_DASH } GdkLineStyle;
 typedef enum { GDK_CAP_NOT_LAST, GDK_CAP_BUTT, GDK_CAP_ROUND, GDK_CAP_PROJECTING } GdkCapStyle;
 typedef enum { GDK_JOIN_MITER, GDK_JOIN_ROUND, GDK_JOIN_BEVEL } GdkJoinStyle;
+GType gdk_line_style_get_type (void) G_GNUC_CONST;
+GType gdk_cap_style_get_type (void) G_GNUC_CONST;
+GType gdk_join_style_get_type (void) G_GNUC_CONST;
+GType gdk_fill_get_type (void) G_GNUC_CONST;
+#define GDK_TYPE_LINE_STYLE (gdk_line_style_get_type ())
+#define GDK_TYPE_CAP_STYLE  (gdk_cap_style_get_type ())
+#define GDK_TYPE_JOIN_STYLE (gdk_join_style_get_type ())
+#define GDK_TYPE_FILL       (gdk_fill_get_type ())
+/* the priority GDK redraws at (idle handlers above it run before drawing) */
+#define GDK_PRIORITY_REDRAW (G_PRIORITY_HIGH_IDLE + 20)
+#ifndef GDK_PRIORITY_EVENTS
+#define GDK_PRIORITY_EVENTS (G_PRIORITY_DEFAULT)
+#endif
+
+/* GdkRegion (GTK 2): a set of pixels, as X regions are */
+typedef struct _GdkRegion GdkRegion;
+typedef enum { GDK_EVEN_ODD_RULE, GDK_WINDING_RULE } GdkFillRule;
+typedef enum { GDK_OVERLAP_RECTANGLE_IN, GDK_OVERLAP_RECTANGLE_OUT, GDK_OVERLAP_RECTANGLE_PART } GdkOverlapType;
+typedef struct { gint x, y, width; } GdkSpan;
+typedef void (*GdkSpanFunc) (GdkSpan *span, gpointer data);
+GdkRegion     *gdk_region_new (void);
+GdkRegion     *gdk_region_polygon (const GdkPoint *points, gint n_points, GdkFillRule fill_rule);
+GdkRegion     *gdk_region_copy (const GdkRegion *region);
+GdkRegion     *gdk_region_rectangle (const GdkRectangle *rectangle);
+void           gdk_region_destroy (GdkRegion *region);
+void           gdk_region_get_clipbox (const GdkRegion *region, GdkRectangle *rectangle);
+void           gdk_region_get_rectangles (const GdkRegion *region, GdkRectangle **rectangles, gint *n_rectangles);
+gboolean       gdk_region_empty (const GdkRegion *region);
+gboolean       gdk_region_equal (const GdkRegion *region1, const GdkRegion *region2);
+gboolean       gdk_region_rect_equal (const GdkRegion *region, const GdkRectangle *rectangle);
+gboolean       gdk_region_point_in (const GdkRegion *region, int x, int y);
+GdkOverlapType gdk_region_rect_in (const GdkRegion *region, const GdkRectangle *rectangle);
+void           gdk_region_offset (GdkRegion *region, gint dx, gint dy);
+void           gdk_region_shrink (GdkRegion *region, gint dx, gint dy);
+void           gdk_region_union_with_rect (GdkRegion *region, const GdkRectangle *rect);
+void           gdk_region_intersect (GdkRegion *source1, const GdkRegion *source2);
+void           gdk_region_union (GdkRegion *source1, const GdkRegion *source2);
+void           gdk_region_subtract (GdkRegion *source1, const GdkRegion *source2);
+void           gdk_region_xor (GdkRegion *source1, const GdkRegion *source2);
+void           gdk_region_spans_intersect_foreach (GdkRegion *region, const GdkSpan *spans, int n_spans, gboolean sorted,
+                                                   GdkSpanFunc function, gpointer data);
+void           gdk_window_invalidate_region (GdkWindow *window, const GdkRegion *region, gboolean invalidate_children);
+GdkRegion     *gdk_window_get_update_area (GdkWindow *window);
+void           gdk_window_process_updates (GdkWindow *window, gboolean update_children);
+void           gdk_window_process_all_updates (void);
+void           gdk_window_begin_paint_region (GdkWindow *window, const GdkRegion *region);
+void           gdk_window_begin_paint_rect (GdkWindow *window, const GdkRectangle *rectangle);
+void           gdk_window_end_paint (GdkWindow *window);
+void           gdk_window_freeze_updates (GdkWindow *window);
+void           gdk_window_thaw_updates (GdkWindow *window);
+void           gdk_cairo_region (cairo_t *cr, const GdkRegion *region);
 typedef enum { GDK_CLIP_BY_CHILDREN, GDK_INCLUDE_INFERIORS } GdkSubwindowMode;
 typedef enum {
   GDK_GC_FOREGROUND = 1 << 0, GDK_GC_BACKGROUND = 1 << 1, GDK_GC_FONT = 1 << 2, GDK_GC_FUNCTION = 1 << 3,
@@ -467,6 +532,7 @@ void     gdk_gc_set_ts_origin (GdkGC *gc, gint x, gint y);
 void     gdk_gc_set_clip_origin (GdkGC *gc, gint x, gint y);
 void     gdk_gc_set_clip_mask (GdkGC *gc, GdkBitmap *mask);
 void     gdk_gc_set_clip_rectangle (GdkGC *gc, const GdkRectangle *rectangle);
+void     gdk_gc_set_clip_region (GdkGC *gc, const GdkRegion *region);
 void     gdk_gc_set_subwindow (GdkGC *gc, GdkSubwindowMode mode);
 void     gdk_gc_set_exposures (GdkGC *gc, gboolean exposures);
 void     gdk_gc_set_line_attributes (GdkGC *gc, gint line_width, GdkLineStyle line_style, GdkCapStyle cap_style, GdkJoinStyle join_style);
@@ -500,12 +566,58 @@ void     gdk_window_get_geometry (GdkWindow *window, gint *x, gint *y, gint *wid
 void     gdk_window_get_position (GdkWindow *window, gint *x, gint *y);
 gint     gdk_window_get_origin (GdkWindow *window, gint *x, gint *y);
 GdkWindow *gdk_window_get_pointer (GdkWindow *window, gint *x, gint *y, GdkModifierType *mask);
+/* the drawable's pixels (a window's backing store) into dest, or a new pixbuf */
+GdkPixbuf *gdk_pixbuf_get_from_drawable (GdkPixbuf *dest, GdkDrawable *src, GdkColormap *cmap, int src_x, int src_y,
+                                         int dest_x, int dest_y, int width, int height);
+GdkPixbuf *gdk_pixbuf_get_from_surface (cairo_surface_t *surface, gint src_x, gint src_y, gint width, gint height);
+GdkPixbuf *gdk_pixbuf_get_from_window (GdkWindow *window, gint src_x, gint src_y, gint width, gint height);
 
-/* Devices (GTK 3): one pointer and one keyboard, Qt's */
+/* Devices: the core pointer and keyboard, and the tools of graphics
+ * tablets (pen, eraser ...) Qt reports, with pressure and tilt; widgets
+ * get a tool's events once they ask for extension events (GTK 2) */
 typedef struct _GdkSeat GdkSeat;
 typedef struct _GdkDeviceManager GdkDeviceManager;
 typedef enum { GDK_SOURCE_MOUSE, GDK_SOURCE_PEN, GDK_SOURCE_ERASER, GDK_SOURCE_CURSOR, GDK_SOURCE_KEYBOARD,
                GDK_SOURCE_TOUCHSCREEN, GDK_SOURCE_TOUCHPAD, GDK_SOURCE_TRACKPOINT, GDK_SOURCE_TABLET_PAD } GdkInputSource;
+typedef enum { GDK_MODE_DISABLED, GDK_MODE_SCREEN, GDK_MODE_WINDOW } GdkInputMode;
+typedef enum { GDK_AXIS_IGNORE, GDK_AXIS_X, GDK_AXIS_Y, GDK_AXIS_PRESSURE, GDK_AXIS_XTILT, GDK_AXIS_YTILT, GDK_AXIS_WHEEL,
+               GDK_AXIS_LAST } GdkAxisUse;
+typedef enum { GDK_EXTENSION_EVENTS_NONE, GDK_EXTENSION_EVENTS_ALL, GDK_EXTENSION_EVENTS_CURSOR } GdkExtensionMode;
+typedef struct _GdkDeviceAxis { GdkAxisUse use; gdouble min; gdouble max; } GdkDeviceAxis;
+typedef struct _GdkDeviceKey { guint keyval; GdkModifierType modifiers; } GdkDeviceKey;
+/* GTK 2's public fields */
+struct _GdkDevice {
+  GObject parent_instance;
+  gchar *name;
+  GdkInputSource source;
+  GdkInputMode mode;
+  gboolean has_cursor;
+  gint num_axes;
+  GdkDeviceAxis *axes;
+  gint num_keys;
+  GdkDeviceKey *keys;
+};
+#define GDK_TYPE_DEVICE   (gdk_device_get_type ())
+#define GDK_DEVICE(o)     (G_TYPE_CHECK_INSTANCE_CAST ((o), GDK_TYPE_DEVICE, GdkDevice))
+#define GDK_IS_DEVICE(o)  (G_TYPE_CHECK_INSTANCE_TYPE ((o), GDK_TYPE_DEVICE))
+GType       gdk_device_get_type (void) G_GNUC_CONST;
+GList      *gdk_devices_list (void);
+GdkDevice  *gdk_device_get_core_pointer (void);
+void        gdk_device_set_source (GdkDevice *device, GdkInputSource source);
+gboolean    gdk_device_set_mode (GdkDevice *device, GdkInputMode mode);
+GdkInputMode gdk_device_get_mode (GdkDevice *device);
+void        gdk_device_set_key (GdkDevice *device, guint index_, guint keyval, GdkModifierType modifiers);
+void        gdk_device_set_axis_use (GdkDevice *device, guint index_, GdkAxisUse use);
+GdkAxisUse  gdk_device_get_axis_use (GdkDevice *device, guint index_);
+gint        gdk_device_get_n_axes (GdkDevice *device);
+gboolean    gdk_device_get_has_cursor (GdkDevice *device);
+void        gdk_device_get_state (GdkDevice *device, GdkWindow *window, gdouble *axes, GdkModifierType *mask);
+gboolean    gdk_device_get_axis (GdkDevice *device, gdouble *axes, GdkAxisUse use, gdouble *value);
+gboolean    gdk_device_get_history (GdkDevice *device, GdkWindow *window, guint32 start, guint32 stop,
+                                    gpointer **events, gint *n_events);
+void        gdk_device_free_history (gpointer *events, gint n_events);
+gboolean    gdk_event_get_axis (const GdkEvent *event, GdkAxisUse axis_use, gdouble *value);
+void        gdk_input_set_extension_events (GdkWindow *window, gint mask, GdkExtensionMode mode);
 GdkWindow  *gdk_window_get_device_position (GdkWindow *window, GdkDevice *device, gint *x, gint *y, GdkModifierType *mask);
 void        gdk_device_get_position (GdkDevice *device, GdkScreen **screen, gint *x, gint *y);
 const gchar *gdk_device_get_name (GdkDevice *device);

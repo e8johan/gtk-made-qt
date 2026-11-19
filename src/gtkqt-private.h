@@ -149,6 +149,7 @@ void gtkqt_connect (GtkWidget *w, Sender *sender, Signal sig, F fn) {
 void gtkqt_defer_delete (QObject *obj);
 
 /* ---------- visibility / placement ---------- */
+void gtkqt_queue_check_resize (GtkWidget *widget);   /* "check-resize" on its toplevel, from an idle */
 void gtkqt_sync_visible (GtkWidget *widget);      /* push priv->visible to the Qt widget */
 void gtkqt_apply_size_request (GtkWidget *widget);
 class QScrollBar;
@@ -217,13 +218,26 @@ struct _GdkWindow {
   GdkPixmap *back_pixmap;         /* window background pixmap (gdk_window_set_back_pixmap) */
   QImage *image;                  /* GdkImage-free fast path unused; reserved */
   gint event_mask;
+  int origin_x, origin_y;         /* where the window's (0,0) is in qw: a GtkLayout's bin_window
+                                     is the whole layout, scrolled; width/height are then its size */
+};
+/* A QWidget that keeps the backing store of a GdkWindow it shows (GtkLayout's
+ * bin_window): drawing on the window goes there, in and outside expose */
+class GtkQtBackedWindow {
+public:
+  virtual ~GtkQtBackedWindow () = default;
+  virtual cairo_surface_t *gdk_surface () = 0;
 };
 QObject   *gtkqt_canvas_create (GtkWidget *w);             /* a widget the program draws on (backing store) */
 cairo_surface_t *gtkqt_canvas_surface (GtkWidget *w);
 QPixmap    gtkqt_qpixmap (GdkPixmap *pixmap, GdkBitmap *mask);      /* its backing image, for drawing outside expose */
 GdkWindow *gtkqt_drawable_new (int kind, GtkWidget *widget);
 cairo_surface_t *gtkqt_drawable_target (GdkDrawable *d);   /* nullptr when it cannot be drawn on now */
-QImage gtkqt_surface_image (cairo_surface_t *s);   /* a copy; RGB24 (pixmaps) comes out opaque */
+QImage gtkqt_surface_image (cairo_surface_t *s);
+void    gtkqt_radio_join (GtkWidget *w, GtkWidget *member);   /* member NULL: a group of its own */
+GSList *gtkqt_radio_members (GtkWidget *w);
+class QScrollBar;
+GtkWidget *gtkqt_scrollbar_wrap (QScrollBar *sb, GtkAdjustment *adjustment, GtkWidget *parent);   /* a copy; RGB24 (pixmaps) comes out opaque */
 GtkStyle  *gtkqt_default_style_ref (void);
 QFont      gtkqt_font_from_pango (const PangoFontDescription *desc);
 PangoFontDescription *gtkqt_pango_from_font (const QFont &font);
@@ -236,10 +250,18 @@ QObject   *gtkqt_file_dialog_create (GtkWidget *w);
 /* ---------- misc ---------- */
 GdkWindow *gtkqt_gdk_window (GtkWidget *widget);
 void       gtkqt_accel_path_attach (GtkWidget *item, const gchar *path, GtkAccelGroup *group);   /* GtkAccelMap */
+/* input devices (devices.cpp): the core pointer events come from; tablet
+ * events turned into GDK events for widgets that ask for them */
+GdkDevice *gtkqt_core_pointer (void);
+class QTabletEvent;
+bool       gtkqt_tablet_event (GtkWidget *widget, QWidget *qw, QTabletEvent *event, GdkWindow *window);
+void       gtkqt_devices_init (void);
 gboolean   gtkqt_bindings_activate (GtkWidget *widget, guint keyval, guint state);   /* GtkBindingSet */
 QImage     gtkqt_pixbuf_image (GdkPixbuf *pixbuf);
 GdkPixbuf *gtkqt_pixbuf_from_image (const QImage &image);
 GtkWidget *gtkqt_text_buffer_any_view (GtkTextBuffer *buffer);
+class QTextDocument;
+QTextDocument *gtkqt_text_buffer_document (GtkTextBuffer *buffer);   /* its text, formatted by the tags */
 int        gtkqt_dialog_run_loop (GtkDialog *dialog);
 GtkAccelGroup *gtkqt_accel_group_dummy (void);
 void       gtkqt_accel_group_attach (GtkAccelGroup *group, QWidget *window);

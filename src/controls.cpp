@@ -524,6 +524,9 @@ static void radio_join (GtkWidget *w, RadioGroup *g)
     g->qgroup->setExclusive (true);
   }
   bool first = g->members == nullptr;
+  /* as gtk_radio_button_set_group: joining a group with members makes it inactive */
+  if (!first)
+    if (auto *b = gtkqt_q<QAbstractButton> (w); b && b->isChecked ()) b->setChecked (false);
   g->members = g_slist_prepend (g->members, w);
   g->refs++;
   g_object_set_data (G_OBJECT (w), "gtkqt-radio-group", g);
@@ -531,8 +534,23 @@ static void radio_join (GtkWidget *w, RadioGroup *g)
   if (auto *b = gtkqt_q<QAbstractButton> (w)) {
     b->setAutoExclusive (false);
     g->qgroup->addButton (b);
-    if (first && GTK_IS_RADIO_BUTTON (w)) b->setChecked (true);
+    if (first && (GTK_IS_RADIO_BUTTON (w) || GTK_IS_RADIO_TOOL_BUTTON (w))) b->setChecked (true);
   }
+}
+
+/* for the other radio widgets (GtkRadioToolButton): join member's group, or a new one */
+void gtkqt_radio_join (GtkWidget *w, GtkWidget *member)
+{
+  radio_join (w, member ? radio_group_of (member) : nullptr);
+  if (member && !radio_group_of (member)) {
+    radio_join (member, nullptr);
+    radio_join (w, radio_group_of (member));
+  }
+}
+GSList *gtkqt_radio_members (GtkWidget *w)
+{
+  RadioGroup *g = radio_group_of (w);
+  return g ? g->members : nullptr;
 }
 
 static QObject *radio_create (GtkWidget *w)
@@ -1903,6 +1921,16 @@ static void gtk_image_class_init (GtkImageClass *klass)
               }, nullptr);
 }
 
+/* What the image shows, for the getters: GTK keeps one of these */
+static void image_reset (GtkImage *image, GtkImageType type)
+{
+  GObject *o = G_OBJECT (image);
+  g_object_set_data (o, "gtkqt-pixbuf", nullptr);
+  g_object_set_data (o, "gtkqt-animation", nullptr);   /* stops its timer */
+  g_object_set_data (o, "gtkqt-icon-name", nullptr);
+  g_object_set_data (o, "gtkqt-storage", GINT_TO_POINTER (type));
+}
+
 static void image_show_icon (GtkImage *image)
 {
   auto *l = gtkqt_q<QLabel> (GTK_WIDGET (image));
@@ -1935,7 +1963,12 @@ GtkWidget *gtk_image_new_from_icon_name (const gchar *icon_name, GtkIconSize siz
   return w;
 }
 
-GtkWidget *gtk_image_new_from_stock (const gchar *stock_id, GtkIconSize size) { return gtk_image_new_from_icon_name (stock_id, size); }
+GtkWidget *gtk_image_new_from_stock (const gchar *stock_id, GtkIconSize size)
+{
+  GtkWidget *w = gtk_image_new ();
+  gtk_image_set_from_stock (GTK_IMAGE (w), stock_id, size);
+  return w;
+}
 
 GtkWidget *gtk_image_new_from_pixbuf (GdkPixbuf *pixbuf)
 {
@@ -1944,17 +1977,27 @@ GtkWidget *gtk_image_new_from_pixbuf (GdkPixbuf *pixbuf)
   return w;
 }
 
+/* a file is a pixbuf or, with several frames, an animation */
 void gtk_image_set_from_file (GtkImage *image, const gchar *filename)
 {
   auto *l = gtkqt_q<QLabel> (GTK_WIDGET (image));
   if (!l) return;
-  QPixmap pm (gtkqt_str (filename));
-  if (pm.isNull ()) l->setPixmap (QApplication::style ()->standardIcon (QStyle::SP_MessageBoxWarning).pixmap (16, 16));
-  else l->setPixmap (pm);
+  GdkPixbufAnimation *a = filename ? gdk_pixbuf_animation_new_from_file (filename, nullptr) : nullptr;
+  if (!a) {
+    /* GTK's missing image */
+    image_reset (image, GTK_IMAGE_EMPTY);
+    l->setPixmap (QApplication::style ()->standardIcon (QStyle::SP_MessageBoxWarning).pixmap (16, 16));
+    return;
+  }
+  if (gdk_pixbuf_animation_is_static_image (a)) gtk_image_set_from_pixbuf (image, gdk_pixbuf_animation_get_static_image (a));
+  else gtk_image_set_from_animation (image, a);
+  g_object_unref (a);
 }
 
 void gtk_image_set_from_icon_name (GtkImage *image, const gchar *icon_name, GtkIconSize size)
 {
+  image_reset (image, GTK_IMAGE_ICON_NAME);
+  g_object_set_data (G_OBJECT (image), "gtkqt-icon-size", GINT_TO_POINTER (size));
   g_object_set_data_full (G_OBJECT (image), "gtkqt-icon-name", g_strdup (icon_name), g_free);
   g_object_set_data (G_OBJECT (image), "gtkqt-icon-px", GINT_TO_POINTER (gtkqt_icon_size_px (size)));
   image_show_icon (image);
@@ -1962,7 +2005,128 @@ void gtk_image_set_from_icon_name (GtkImage *image, const gchar *icon_name, GtkI
 
 void gtk_image_set_from_pixbuf (GtkImage *image, GdkPixbuf *pixbuf)
 {
-  if (auto *l = gtkqt_q<QLabel> (GTK_WIDGET (image))) l->setPixmap (QPixmap::fromImage (gtkqt_pixbuf_image (pixbuf)));
+  image_reset (image, pixbuf ? GTK_IMAGE_PIXBUF : GTK_IMAGE_EMPTY);
+  if (pixbuf) g_object_set_data_full (G_OBJECT (image), "gtkqt-pixbuf", g_object_ref (pixbuf), g_object_unref);
+  if (auto *l = gtkqt_q<QLabel> (GTK_WIDGET (image))) {
+    if (pixbuf) l->setPixmap (QPixmap::fromImage (gtkqt_pixbuf_image (pixbuf)));
+    else l->clear ();
+  }
+}
+
+/* an animation plays: the iterator says which frame and for how long */
+struct ImageAnimation {
+  GdkPixbufAnimation *anim;
+  GdkPixbufAnimationIter *iter;
+  QTimer *timer;
+  ~ImageAnimation () { delete timer; g_object_unref (iter); g_object_unref (anim); }
+};
+
+static void image_animation_step (GtkImage *image, ImageAnimation *ia)
+{
+  auto *l = gtkqt_q<QLabel> (GTK_WIDGET (image));
+  if (!l) return;
+  l->setPixmap (QPixmap::fromImage (gtkqt_pixbuf_image (gdk_pixbuf_animation_iter_get_pixbuf (ia->iter))));
+  int delay = gdk_pixbuf_animation_iter_get_delay_time (ia->iter);
+  if (delay >= 0) ia->timer->start (qMax (20, delay));
+}
+
+void gtk_image_set_from_animation (GtkImage *image, GdkPixbufAnimation *animation)
+{
+  image_reset (image, animation ? GTK_IMAGE_ANIMATION : GTK_IMAGE_EMPTY);
+  if (!animation) { gtk_image_clear (image); return; }
+  auto *ia = new ImageAnimation { (GdkPixbufAnimation *) g_object_ref (animation), gdk_pixbuf_animation_get_iter (animation, nullptr), new QTimer };
+  ia->timer->setSingleShot (true);
+  QObject::connect (ia->timer, &QTimer::timeout, ia->timer, [image, ia] {
+    gdk_pixbuf_animation_iter_advance (ia->iter, nullptr);
+    image_animation_step (image, ia);
+  });
+  g_object_set_data_full (G_OBJECT (image), "gtkqt-animation", ia, [] (gpointer p) { delete static_cast<ImageAnimation *> (p); });
+  image_animation_step (image, ia);
+}
+
+GtkWidget *gtk_image_new_from_animation (GdkPixbufAnimation *animation)
+{
+  GtkWidget *w = gtk_image_new ();
+  gtk_image_set_from_animation (GTK_IMAGE (w), animation);
+  return w;
+}
+
+GdkPixbufAnimation *gtk_image_get_animation (GtkImage *image)
+{
+  auto *ia = static_cast<ImageAnimation *> (g_object_get_data (G_OBJECT (image), "gtkqt-animation"));
+  return ia ? ia->anim : nullptr;
+}
+
+GdkPixbuf *gtk_image_get_pixbuf (GtkImage *image) { return (GdkPixbuf *) g_object_get_data (G_OBJECT (image), "gtkqt-pixbuf"); }
+
+GtkImageType gtk_image_get_storage_type (GtkImage *image)
+{
+  return (GtkImageType) GPOINTER_TO_INT (g_object_get_data (G_OBJECT (image), "gtkqt-storage"));
+}
+
+void gtk_image_set_from_stock (GtkImage *image, const gchar *stock_id, GtkIconSize size)
+{
+  gtk_image_set_from_icon_name (image, stock_id, size);
+  g_object_set_data (G_OBJECT (image), "gtkqt-storage", GINT_TO_POINTER (GTK_IMAGE_STOCK));
+}
+
+void gtk_image_get_stock (GtkImage *image, gchar **stock_id, GtkIconSize *size)
+{
+  bool stock = gtk_image_get_storage_type (image) == GTK_IMAGE_STOCK;
+  if (stock_id) *stock_id = stock ? (gchar *) g_object_get_data (G_OBJECT (image), "gtkqt-icon-name") : nullptr;
+  if (size) *size = (GtkIconSize) GPOINTER_TO_INT (g_object_get_data (G_OBJECT (image), "gtkqt-icon-size"));
+}
+
+void gtk_image_get_icon_name (GtkImage *image, const gchar **icon_name, GtkIconSize *size)
+{
+  bool named = gtk_image_get_storage_type (image) == GTK_IMAGE_ICON_NAME;
+  if (icon_name) *icon_name = named ? (const gchar *) g_object_get_data (G_OBJECT (image), "gtkqt-icon-name") : nullptr;
+  if (size) *size = (GtkIconSize) GPOINTER_TO_INT (g_object_get_data (G_OBJECT (image), "gtkqt-icon-size"));
+}
+
+gint gtk_image_get_pixel_size (GtkImage *image)
+{
+  gpointer p = g_object_get_data (G_OBJECT (image), "gtkqt-pixel-size");
+  return p ? GPOINTER_TO_INT (p) : -1;
+}
+
+/* GIcon: a themed icon by its names, a file icon by its file */
+void gtk_image_set_from_gicon (GtkImage *image, GIcon *icon, GtkIconSize size)
+{
+  if (G_IS_THEMED_ICON (icon)) {
+    const gchar *const *names = g_themed_icon_get_names (G_THEMED_ICON (icon));
+    for (int i = 0; names && names[i]; i++)
+      if (!gtkqt_icon (names[i]).isNull () || !names[i + 1]) { gtk_image_set_from_icon_name (image, names[i], size); break; }
+  } else if (G_IS_FILE_ICON (icon)) {
+    gchar *path = g_file_get_path (g_file_icon_get_file (G_FILE_ICON (icon)));
+    gtk_image_set_from_file (image, path);
+    g_free (path);
+  } else if (GDK_IS_PIXBUF (icon)) {
+    gtk_image_set_from_pixbuf (image, GDK_PIXBUF (icon));
+  }
+}
+
+GtkWidget *gtk_image_new_from_gicon (GIcon *icon, GtkIconSize size)
+{
+  GtkWidget *w = gtk_image_new ();
+  gtk_image_set_from_gicon (GTK_IMAGE (w), icon, size);
+  return w;
+}
+
+void gtk_image_set_from_resource (GtkImage *image, const gchar *resource_path)
+{
+  GdkPixbufAnimation *a = resource_path ? gdk_pixbuf_animation_new_from_resource (resource_path, nullptr) : nullptr;
+  if (!a) { gtk_image_set_from_pixbuf (image, nullptr); return; }
+  if (gdk_pixbuf_animation_is_static_image (a)) gtk_image_set_from_pixbuf (image, gdk_pixbuf_animation_get_static_image (a));
+  else gtk_image_set_from_animation (image, a);
+  g_object_unref (a);
+}
+
+GtkWidget *gtk_image_new_from_resource (const gchar *resource_path)
+{
+  GtkWidget *w = gtk_image_new ();
+  gtk_image_set_from_resource (GTK_IMAGE (w), resource_path);
+  return w;
 }
 
 void gtk_image_set_pixel_size (GtkImage *image, gint pixel_size)
@@ -1971,7 +2135,11 @@ void gtk_image_set_pixel_size (GtkImage *image, gint pixel_size)
   image_show_icon (image);
 }
 
-void gtk_image_clear (GtkImage *image) { if (auto *l = gtkqt_q<QLabel> (GTK_WIDGET (image))) l->clear (); }
+void gtk_image_clear (GtkImage *image)
+{
+  image_reset (image, GTK_IMAGE_EMPTY);
+  if (auto *l = gtkqt_q<QLabel> (GTK_WIDGET (image))) l->clear ();
+}
 GtkWidget *gtk_picture_new_for_filename (const char *filename) { return gtk_image_new_from_file (filename); }
 }
 

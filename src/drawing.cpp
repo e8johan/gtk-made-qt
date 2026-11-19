@@ -589,6 +589,12 @@ GdkEvent *gdk_event_copy (GdkEvent *event)
 {
   auto *c = (GdkEvent *) g_memdup2 (event, sizeof (GdkEvent));
   if ((c->type == GDK_KEY_PRESS || c->type == GDK_KEY_RELEASE) && c->key.string) c->key.string = g_strdup (c->key.string);
+  /* a tablet tool's axes belong to the copy */
+  gdouble **axes = c->type == GDK_MOTION_NOTIFY ? &c->motion.axes
+                   : (c->type == GDK_BUTTON_PRESS || c->type == GDK_2BUTTON_PRESS || c->type == GDK_3BUTTON_PRESS ||
+                      c->type == GDK_BUTTON_RELEASE) ? &c->button.axes : nullptr;
+  GdkDevice *dev = c->type == GDK_MOTION_NOTIFY ? c->motion.device : axes ? c->button.device : nullptr;
+  if (axes && *axes) *axes = dev ? (gdouble *) g_memdup2 (*axes, sizeof (gdouble) * dev->num_axes) : nullptr;
   return c;
 }
 
@@ -596,6 +602,10 @@ void gdk_event_free (GdkEvent *event)
 {
   if (!event) return;
   if (event->type == GDK_KEY_PRESS || event->type == GDK_KEY_RELEASE) g_free (event->key.string);
+  if (event->type == GDK_MOTION_NOTIFY) g_free (event->motion.axes);
+  else if (event->type == GDK_BUTTON_PRESS || event->type == GDK_2BUTTON_PRESS || event->type == GDK_3BUTTON_PRESS ||
+           event->type == GDK_BUTTON_RELEASE)
+    g_free (event->button.axes);
   g_free (event);
 }
 
@@ -728,7 +738,7 @@ void gdk_window_invalidate_rect (GdkWindow *window, const GdkRectangle *rect, gb
 {
   if (!window) return;
   if (window->qw) {
-    if (rect) window->qw->update (rect->x, rect->y, rect->width, rect->height);
+    if (rect) window->qw->update (rect->x + window->origin_x, rect->y + window->origin_y, rect->width, rect->height);
     else window->qw->update ();
     return;
   }
@@ -878,6 +888,9 @@ gint gdk_screen_height (void) { gtkqt_ensure_app (); return gdk_screen_get_heigh
 void gdk_beep (void) { QApplication::beep (); }
 void gdk_display_beep (GdkDisplay *) { QApplication::beep (); }
 void gdk_flush (void) {}
+/* no request queue to flush or wait for: drawing reaches Qt at once */
+void gdk_display_sync (GdkDisplay *) {}
+void gdk_display_flush (GdkDisplay *) {}
 void gdk_threads_init (void) { gtkqt_threads_init (); }
 void gdk_threads_enter (void) { gtkqt_threads_enter (); }
 void gdk_threads_leave (void) { gtkqt_threads_leave (); }

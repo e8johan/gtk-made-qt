@@ -366,6 +366,8 @@ typedef enum { GTK_ANCHOR_CENTER, GTK_ANCHOR_NORTH, GTK_ANCHOR_NORTH_WEST, GTK_A
                GTK_ANCHOR_N = GTK_ANCHOR_NORTH, GTK_ANCHOR_NW = GTK_ANCHOR_NORTH_WEST, GTK_ANCHOR_NE = GTK_ANCHOR_NORTH_EAST,
                GTK_ANCHOR_S = GTK_ANCHOR_SOUTH, GTK_ANCHOR_SW = GTK_ANCHOR_SOUTH_WEST, GTK_ANCHOR_SE = GTK_ANCHOR_SOUTH_EAST,
                GTK_ANCHOR_W = GTK_ANCHOR_WEST, GTK_ANCHOR_E = GTK_ANCHOR_EAST } GtkAnchorType;
+GType gtk_anchor_type_get_type (void) G_GNUC_CONST;
+#define GTK_TYPE_ANCHOR_TYPE (gtk_anchor_type_get_type ())
 typedef struct _GtkPackerChild {
   GtkWidget *widget;
   GtkAnchorType anchor;

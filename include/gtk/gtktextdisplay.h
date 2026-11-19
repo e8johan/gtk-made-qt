@@ -1,2 +1,2 @@
-/* GTK made Qt: GTK declares everything in one umbrella header. */
-#include <gtk/gtk.h>
+/* GTK made Qt: GTK 2's semi-public text layout */
+#include <gtk/gtkqt-textlayout.h>

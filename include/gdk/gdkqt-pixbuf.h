@@ -83,6 +83,74 @@ gboolean   gdk_pixbuf_save_to_bufferv (GdkPixbuf *pixbuf, gchar **buffer, gsize 
                                        char **option_keys, char **option_values, GError **error);
 gboolean   gdk_pixbuf_save_to_callback (GdkPixbuf *pixbuf, GdkPixbufSaveFunc save_func, gpointer user_data, const char *type, GError **error, ...) G_GNUC_NULL_TERMINATED;
 
+/* Image formats: the ones Qt's image plugins read */
+typedef struct _GdkPixbufFormat GdkPixbufFormat;
+GSList     *gdk_pixbuf_get_formats (void);
+GdkPixbufFormat *gdk_pixbuf_get_file_info (const gchar *filename, gint *width, gint *height);
+gchar      *gdk_pixbuf_format_get_name (GdkPixbufFormat *format);
+gchar      *gdk_pixbuf_format_get_description (GdkPixbufFormat *format);
+gchar     **gdk_pixbuf_format_get_mime_types (GdkPixbufFormat *format);
+gchar     **gdk_pixbuf_format_get_extensions (GdkPixbufFormat *format);
+gboolean    gdk_pixbuf_format_is_writable (GdkPixbufFormat *format);
+gboolean    gdk_pixbuf_format_is_scalable (GdkPixbufFormat *format);
+gboolean    gdk_pixbuf_format_is_disabled (GdkPixbufFormat *format);
+void        gdk_pixbuf_format_set_disabled (GdkPixbufFormat *format, gboolean disabled);
+gchar      *gdk_pixbuf_format_get_license (GdkPixbufFormat *format);
+GdkPixbufFormat *gdk_pixbuf_format_copy (const GdkPixbufFormat *format);
+void        gdk_pixbuf_format_free (GdkPixbufFormat *format);
+
+/* GdkPixbufAnimation: every frame decoded, with its delay */
+typedef struct _GdkPixbufAnimation GdkPixbufAnimation;
+typedef struct _GdkPixbufAnimationIter GdkPixbufAnimationIter;
+#define GDK_TYPE_PIXBUF_ANIMATION        (gdk_pixbuf_animation_get_type ())
+#define GDK_PIXBUF_ANIMATION(o)          (G_TYPE_CHECK_INSTANCE_CAST ((o), GDK_TYPE_PIXBUF_ANIMATION, GdkPixbufAnimation))
+#define GDK_IS_PIXBUF_ANIMATION(o)       (G_TYPE_CHECK_INSTANCE_TYPE ((o), GDK_TYPE_PIXBUF_ANIMATION))
+#define GDK_TYPE_PIXBUF_ANIMATION_ITER   (gdk_pixbuf_animation_iter_get_type ())
+#define GDK_PIXBUF_ANIMATION_ITER(o)     (G_TYPE_CHECK_INSTANCE_CAST ((o), GDK_TYPE_PIXBUF_ANIMATION_ITER, GdkPixbufAnimationIter))
+#define GDK_IS_PIXBUF_ANIMATION_ITER(o)  (G_TYPE_CHECK_INSTANCE_TYPE ((o), GDK_TYPE_PIXBUF_ANIMATION_ITER))
+GType       gdk_pixbuf_animation_get_type (void) G_GNUC_CONST;
+GType       gdk_pixbuf_animation_iter_get_type (void) G_GNUC_CONST;
+GdkPixbufAnimation *gdk_pixbuf_animation_new_from_file (const char *filename, GError **error);
+GdkPixbufAnimation *gdk_pixbuf_animation_new_from_resource (const char *resource_path, GError **error);
+GdkPixbufAnimation *gdk_pixbuf_animation_ref (GdkPixbufAnimation *animation);
+void        gdk_pixbuf_animation_unref (GdkPixbufAnimation *animation);
+int         gdk_pixbuf_animation_get_width (GdkPixbufAnimation *animation);
+int         gdk_pixbuf_animation_get_height (GdkPixbufAnimation *animation);
+gboolean    gdk_pixbuf_animation_is_static_image (GdkPixbufAnimation *animation);
+GdkPixbuf  *gdk_pixbuf_animation_get_static_image (GdkPixbufAnimation *animation);
+/* GTimeVal is deprecated in GLib; gdk-pixbuf's header keeps it too */
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+GdkPixbufAnimationIter *gdk_pixbuf_animation_get_iter (GdkPixbufAnimation *animation, const GTimeVal *start_time);
+int         gdk_pixbuf_animation_iter_get_delay_time (GdkPixbufAnimationIter *iter);
+GdkPixbuf  *gdk_pixbuf_animation_iter_get_pixbuf (GdkPixbufAnimationIter *iter);
+gboolean    gdk_pixbuf_animation_iter_on_currently_loading_frame (GdkPixbufAnimationIter *iter);
+gboolean    gdk_pixbuf_animation_iter_advance (GdkPixbufAnimationIter *iter, const GTimeVal *current_time);
+G_GNUC_END_IGNORE_DEPRECATIONS
+
+/* GdkPixbufLoader: data given in pieces, decoded when complete */
+typedef struct _GdkPixbufLoader { GObject parent_instance; gpointer priv; } GdkPixbufLoader;
+typedef struct _GdkPixbufLoaderClass {
+  GObjectClass parent_class;
+  void (*size_prepared) (GdkPixbufLoader *loader, int width, int height);
+  void (*area_prepared) (GdkPixbufLoader *loader);
+  void (*area_updated) (GdkPixbufLoader *loader, int x, int y, int width, int height);
+  void (*closed) (GdkPixbufLoader *loader);
+} GdkPixbufLoaderClass;
+#define GDK_TYPE_PIXBUF_LOADER        (gdk_pixbuf_loader_get_type ())
+#define GDK_PIXBUF_LOADER(o)          (G_TYPE_CHECK_INSTANCE_CAST ((o), GDK_TYPE_PIXBUF_LOADER, GdkPixbufLoader))
+#define GDK_IS_PIXBUF_LOADER(o)       (G_TYPE_CHECK_INSTANCE_TYPE ((o), GDK_TYPE_PIXBUF_LOADER))
+GType       gdk_pixbuf_loader_get_type (void) G_GNUC_CONST;
+GdkPixbufLoader *gdk_pixbuf_loader_new (void);
+GdkPixbufLoader *gdk_pixbuf_loader_new_with_type (const char *image_type, GError **error);
+GdkPixbufLoader *gdk_pixbuf_loader_new_with_mime_type (const char *mime_type, GError **error);
+void        gdk_pixbuf_loader_set_size (GdkPixbufLoader *loader, int width, int height);
+gboolean    gdk_pixbuf_loader_write (GdkPixbufLoader *loader, const guchar *buf, gsize count, GError **error);
+gboolean    gdk_pixbuf_loader_write_bytes (GdkPixbufLoader *loader, GBytes *buffer, GError **error);
+gboolean    gdk_pixbuf_loader_close (GdkPixbufLoader *loader, GError **error);
+GdkPixbuf  *gdk_pixbuf_loader_get_pixbuf (GdkPixbufLoader *loader);
+GdkPixbufAnimation *gdk_pixbuf_loader_get_animation (GdkPixbufLoader *loader);
+GdkPixbufFormat *gdk_pixbuf_loader_get_format (GdkPixbufLoader *loader);
+
 /* the version gdk-pixbuf reports */
 #define GDK_PIXBUF_MAJOR 2
 #define GDK_PIXBUF_MINOR 42
