@@ -298,6 +298,8 @@ typedef struct _GtkTextViewClass {
 #define GTK_TYPE_TEXT_VIEW  (gtk_text_view_get_type ())
 #define GTK_TEXT_VIEW(o)    (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_TEXT_VIEW, GtkTextView))
 #define GTK_IS_TEXT_VIEW(o) (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_TEXT_VIEW))
+#define GTK_TEXT_VIEW_CLASS(k)     (G_TYPE_CHECK_CLASS_CAST ((k), GTK_TYPE_TEXT_VIEW, GtkTextViewClass))
+#define GTK_TEXT_VIEW_GET_CLASS(o) (G_TYPE_INSTANCE_GET_CLASS ((o), GTK_TYPE_TEXT_VIEW, GtkTextViewClass))
 GType          gtk_text_view_get_type (void) G_GNUC_CONST;
 GtkWidget     *gtk_text_view_new (void);
 GtkWidget     *gtk_text_view_new_with_buffer (GtkTextBuffer *buffer);

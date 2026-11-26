@@ -187,6 +187,7 @@ cairo, Pango, CMake. GLib, cairo and Pango are plain C libraries, not GTK.
 | Images | GdkPixbuf (the whole gdk-pixbuf 2 API on QImage: loading, the incremental loader, animations, formats, scaling and compositing, saving), GtkImage with animations, GtkStatusIcon |
 | Devices | GdkDevice with GTK 2's fields: tablet pens and erasers (pressure, tilt) as extension events, proximity, pointer and keyboard grabs, cursors (pixmap and pixbuf cursors) |
 | Accessibility | GtkAccessible and libgailutil (GailTextUtil, gail_misc) on the real ATK, for libraries such as libgnomecanvas |
+| Styling | gtkrc and CSS for what is the program's, not the theme's: colours (fg/bg/text/base, `color`, `background-color`), fonts, key bindings (`binding`/`@binding-set`) and key themes such as Emacs; rc styles by class, widget and widget_class paths; CSS on node and type names, `#name`, `.class` and state pseudo-classes, `@define-color`, provider priorities, per-widget providers; settings from `~/.gtkrc-2.0` and `settings.ini`. The program's own `modify_*`/`override_*` win, as in GTK |
 | Other | GtkBuilder, GtkSettings, stock items and icon factories, key bindings, the accel map, GtkClipboard (text, images, program-provided targets, target lists), drag-and-drop destinations, GdkRegion |
 
 Tests: `tests/` (run at all API levels) and every example, headless, via
@@ -203,8 +204,10 @@ same size:
 
 ## What is missing
 
-- CSS and gtkrc styling: programs take the Qt look; a few style classes get a
-  rough equivalent.
+- Themes: the look is Qt's. Theme gtkrc files, engines, pixmaps and CSS
+  about borders, padding, images, transitions and animations are ignored;
+  `:focus`, `:backdrop` and other states Qt does not paint separately are
+  not matched, and neither are sibling combinators.
 - GTK 4 list widgets (GtkListView, GtkColumnView, GtkGridView), GtkListBox,
   GtkFlowBox, GtkFontChooser, drag sources, the GTK 4 clipboard API, the
   GTK 1 GtkTree widget.

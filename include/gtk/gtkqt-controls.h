@@ -210,6 +210,8 @@ typedef struct _GtkEntryClass { GtkWidgetClass parent_class; } GtkEntryClass;
 #define GTK_TYPE_ENTRY  (gtk_entry_get_type ())
 #define GTK_ENTRY(o)    (G_TYPE_CHECK_INSTANCE_CAST ((o), GTK_TYPE_ENTRY, GtkEntry))
 #define GTK_IS_ENTRY(o) (G_TYPE_CHECK_INSTANCE_TYPE ((o), GTK_TYPE_ENTRY))
+#define GTK_ENTRY_CLASS(k)     (G_TYPE_CHECK_CLASS_CAST ((k), GTK_TYPE_ENTRY, GtkEntryClass))
+#define GTK_ENTRY_GET_CLASS(o) (G_TYPE_INSTANCE_GET_CLASS ((o), GTK_TYPE_ENTRY, GtkEntryClass))
 typedef struct _GtkEntryBuffer GtkEntryBuffer;
 #define GTK_ENTRY_BUFFER(o) ((GtkEntryBuffer *) (o))
 GType        gtk_entry_get_type (void) G_GNUC_CONST;

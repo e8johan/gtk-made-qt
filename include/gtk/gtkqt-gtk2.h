@@ -82,6 +82,10 @@ void         gtk_settings_set_long_property (GtkSettings *settings, const gchar 
 void         gtk_rc_parse_string (const gchar *rc_string);
 void         gtk_rc_parse (const gchar *filename);
 void         gtk_rc_add_default_file (const gchar *filename);
+void         gtk_rc_set_default_files (gchar **filenames);
+gchar      **gtk_rc_get_default_files (void);
+gboolean     gtk_rc_reparse_all (void);
+void         gtk_rc_reset_styles (GtkSettings *settings);
 GOptionGroup *gtk_get_option_group (gboolean open_default_display);
 
 /* ---------- stock items, icon factories, icon theme ---------- */
@@ -455,6 +459,21 @@ void     gtk_binding_entry_skip (GtkBindingSet *binding_set, guint keyval, GdkMo
 void     gtk_binding_entry_clear (GtkBindingSet *binding_set, guint keyval, GdkModifierType modifiers);
 gboolean gtk_bindings_activate (GObject *object, guint keyval, GdkModifierType modifiers);
 gboolean gtk_bindings_activate_event (GObject *object, GdkEventKey *event);
+typedef enum { GTK_PATH_WIDGET, GTK_PATH_WIDGET_CLASS, GTK_PATH_CLASS } GtkPathType;
+typedef enum {
+  GTK_PATH_PRIO_LOWEST = 0, GTK_PATH_PRIO_GTK = 4, GTK_PATH_PRIO_APPLICATION = 8,
+  GTK_PATH_PRIO_THEME = 10, GTK_PATH_PRIO_RC = 12, GTK_PATH_PRIO_HIGHEST = 15
+} GtkPathPriorityType;
+#define GTK_PATH_PRIO_MASK 0x0f
+void     gtk_binding_set_add_path (GtkBindingSet *binding_set, GtkPathType path_type, const gchar *path_pattern,
+                                   GtkPathPriorityType priority);
+/* identifiers in binding arguments: names of enum values ("words") */
+GType    gtk_identifier_get_type (void) G_GNUC_CONST;
+#define GTK_TYPE_IDENTIFIER (gtk_identifier_get_type ())
+typedef struct _GtkBindingArg {
+  GType arg_type;
+  union { glong long_data; gdouble double_data; gchar *string_data; } d;
+} GtkBindingArg;
 G_END_DECLS
 
 #endif

@@ -168,6 +168,30 @@ Things that cost time once; check here before debugging something similar.
   explicitly. Compare `nm` of the archive and the shared library after
   adding API.
 
+## gtkrc and CSS
+
+- Key themes and rc styles belong under what the program does itself: the
+  program's `gtk_widget_modify_*` / `override_*` slots are recorded and rc /
+  CSS colours never replace them; `modify_fg (w, state, NULL)` gives the
+  slot back and the rc colour applies again.
+- A binding can emit several signals for one key (Emacs M-space), and
+  `gtk_binding_entry_add_signal` appends to an existing entry; rc `bind`
+  clears it first, `unbind` stops the search, `bind "key" { }` consumes it.
+- Binding arguments are identifiers (`paragraph-ends`): they become the
+  enum value of the signal's parameter type when the signal is emitted.
+- GTK order: CSS sets (`-gtk-key-bindings`), rc path sets by priority, then
+  the class sets. GTK 2 checks mnemonics and window accelerators before
+  any of them, so Emacs Alt+F opens the File menu, as with real GTK.
+- A menu item's QAction keeps its shortcut through the menu bar even when
+  the window drops the accel group: Leafpad's Emacs mode replaces the
+  window's group, so a group that no window has takes its shortcuts away
+  (and gives them back when attached again).
+- "textview text" and "entry selection" name subnodes GTK widgets have
+  and Qt widgets do not: they style the widget itself (`selection` as the
+  SELECTED state).
+- Adwaita draws a gradient image over buttons, so real GTK 3 ignores a
+  button's `background-color` that we show; the program asked for it.
+
 ## Implementation pitfalls
 
 - Static functions in an `extern "C"` block have C linkage: their forward

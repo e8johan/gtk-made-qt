@@ -56,6 +56,23 @@ Leafpad's charset widget), Options/Font, Help/About, File/Print with
 QT_QPA_PLATFORM=offscreen GTKQT_SCRIPT="wait 400; menu Options/Line Numbers; menu Search/Find...; type indented; accept; shot find.png; quit" src/leafpad README
 ```
 
+Emacs key theme: configure Leafpad with `--enable-emacs` and use a scratch
+HOME whose `.gtkrc-2.0` says `gtk-key-theme-name = "Emacs"` (the theme is
+read from `/usr/share/themes/Emacs/gtk-2.0-key/gtkrc`). Use Ctrl keys only:
+Alt+F opens the File menu, as with real GTK 2.
+
+```bash
+printf 'gtk-key-theme-name = "Emacs"\n' > /tmp/h/.gtkrc-2.0
+HOME=/tmp/h QT_QPA_PLATFORM=offscreen GTKQT_SCRIPT="wait 500; key Ctrl+E; type X; key Ctrl+N; key Ctrl+A; key Ctrl+K; key Ctrl+K; key Ctrl+P; shot emacs.png; quit" src/leafpad file.txt
+```
+
+## CSS against real GTK 3
+
+`tests/test-css.c` covers the matching; for the look, build a small GTK 3
+program with a CSS provider both ways and compare (real GTK under Xvfb,
+`import -window root`). Expected difference: Adwaita paints a gradient
+over buttons, so real GTK hides a button's `background-color`.
+
 ## GTK 1.2 tutorial programs
 
 The GTK 1.2 sources ship the tutorial programs (`examples/`). This builds

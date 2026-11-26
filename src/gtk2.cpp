@@ -894,6 +894,14 @@ static void apply_style_color (GtkWidget *w, QPalette::ColorRole role, GtkStateT
   if (state == GTK_STATE_INSENSITIVE) p.setColor (QPalette::Disabled, role, q);
   else if (state == GTK_STATE_SELECTED) p.setColor (role == QPalette::Base || role == QPalette::Window ? QPalette::Highlight : QPalette::HighlightedText, q);
   else if (state == GTK_STATE_NORMAL) { p.setColor (QPalette::Active, role, q); p.setColor (QPalette::Inactive, role, q); }
+  /* buttons and combo boxes draw with the Button roles */
+  if ((role == QPalette::Window || role == QPalette::WindowText) &&
+      (qobject_cast<QAbstractButton *> (qw) || qobject_cast<QComboBox *> (qw))) {
+    QPalette::ColorRole br = role == QPalette::Window ? QPalette::Button : QPalette::ButtonText;
+    QColor bq = c ? q : QApplication::palette ().color (br);
+    if (state == GTK_STATE_INSENSITIVE) p.setColor (QPalette::Disabled, br, bq);
+    else if (state == GTK_STATE_NORMAL) { p.setColor (QPalette::Active, br, bq); p.setColor (QPalette::Inactive, br, bq); }
+  }
   qw->setPalette (p);
   if (auto *a = qobject_cast<QAbstractScrollArea *> (qw)) a->viewport ()->setPalette (p);
 }
@@ -949,7 +957,27 @@ void gtk_widget_set_style (GtkWidget *widget, GtkStyle *style)
   if (style->font_desc) gtk_widget_modify_font (widget, style->font_desc);
 }
 
-void gtk_widget_modify_font (GtkWidget *widget, PangoFontDescription *font_desc)
+} /* extern "C" */
+
+/* Which colours and the font the program set itself (gtk_widget_modify_*,
+ * override_*): rc and CSS styles never replace those. Bit kind*5+state
+ * (kind: 0 fg, 1 bg, 2 text, 3 base), bit 20 the font. */
+static guint &program_style_bits (GtkWidget *w)
+{
+  auto *bits = (guint *) g_object_get_data (G_OBJECT (w), "gtkqt-program-style");
+  if (!bits) {
+    bits = g_new0 (guint, 1);
+    g_object_set_data_full (G_OBJECT (w), "gtkqt-program-style", bits, g_free);
+  }
+  return *bits;
+}
+static void mark_program_style (GtkWidget *w, int bit, bool set)
+{
+  guint &b = program_style_bits (w);
+  if (set) b |= 1u << bit; else b &= ~(1u << bit);
+}
+
+static void style_font (GtkWidget *widget, const PangoFontDescription *font_desc)
 {
   QFont f = gtkqt_font_from_pango (font_desc);
   if (QWidget *qw = gtkqt_qw (widget)) {
@@ -969,31 +997,56 @@ void gtk_widget_modify_font (GtkWidget *widget, PangoFontDescription *font_desc)
   g_signal_emit_by_name (widget, "style-set", nullptr);
 }
 
-void gtk_widget_modify_fg (GtkWidget *w, GtkStateType state, const GdkColor *c)
+static void style_color (GtkWidget *w, int kind, GtkStateType state, const GdkColor *c)
 {
-  own_style (w)->fg[state] = c ? *c : gtk_widget_get_default_style ()->fg[state];
-  style_make_gcs (w->style);
-  apply_style_color (w, QPalette::WindowText, state, c);
+  GtkStyle *def = gtk_widget_get_default_style ();
+  GtkStyle *s = own_style (w);
+  switch (kind) {
+  case 0: s->fg[state] = c ? *c : def->fg[state]; break;
+  case 1: s->bg[state] = c ? *c : def->bg[state]; break;
+  case 2: s->text[state] = c ? *c : def->text[state]; break;
+  default: s->base[state] = c ? *c : def->base[state]; break;
+  }
+  style_make_gcs (s);
+  static const QPalette::ColorRole roles[] = { QPalette::WindowText, QPalette::Window, QPalette::Text, QPalette::Base };
+  apply_style_color (w, roles[kind], state, c);
+  if (QWidget *qw = gtkqt_qw (w); qw && kind == 1 && state == GTK_STATE_NORMAL) {
+    if (c) qw->setAutoFillBackground (true);
+  }
 }
-void gtk_widget_modify_bg (GtkWidget *w, GtkStateType state, const GdkColor *c)
+
+/* the rc / CSS layer: only what the program left alone */
+void gtkqt_style_rc_color (GtkWidget *w, int kind, GtkStateType state, const GdkColor *c)
 {
-  own_style (w)->bg[state] = c ? *c : gtk_widget_get_default_style ()->bg[state];
-  style_make_gcs (w->style);
-  apply_style_color (w, QPalette::Window, state, c);
-  if (QWidget *qw = gtkqt_qw (w); qw && c && state == GTK_STATE_NORMAL) qw->setAutoFillBackground (true);
+  if (program_style_bits (w) & (1u << (kind * 5 + state))) return;
+  style_color (w, kind, state, c);
 }
-void gtk_widget_modify_text (GtkWidget *w, GtkStateType state, const GdkColor *c)
+void gtkqt_style_rc_font (GtkWidget *w, const PangoFontDescription *font_desc)
 {
-  own_style (w)->text[state] = c ? *c : gtk_widget_get_default_style ()->text[state];
-  style_make_gcs (w->style);
-  apply_style_color (w, QPalette::Text, state, c);
+  if (program_style_bits (w) & (1u << 20)) return;
+  style_font (w, font_desc);
 }
-void gtk_widget_modify_base (GtkWidget *w, GtkStateType state, const GdkColor *c)
+
+extern "C" {
+
+void gtk_widget_modify_font (GtkWidget *widget, PangoFontDescription *font_desc)
 {
-  own_style (w)->base[state] = c ? *c : gtk_widget_get_default_style ()->base[state];
-  style_make_gcs (w->style);
-  apply_style_color (w, QPalette::Base, state, c);
+  mark_program_style (widget, 20, font_desc);
+  style_font (widget, font_desc);
+  if (!font_desc) gtkqt_rc_program_reset (widget);
 }
+
+static void modify_color (GtkWidget *w, int kind, GtkStateType state, const GdkColor *c)
+{
+  if (state < GTK_STATE_NORMAL || state > GTK_STATE_INSENSITIVE) return;
+  mark_program_style (w, kind * 5 + state, c);
+  style_color (w, kind, state, c);
+  if (!c) gtkqt_rc_program_reset (w);
+}
+void gtk_widget_modify_fg (GtkWidget *w, GtkStateType state, const GdkColor *c) { modify_color (w, 0, state, c); }
+void gtk_widget_modify_bg (GtkWidget *w, GtkStateType state, const GdkColor *c) { modify_color (w, 1, state, c); }
+void gtk_widget_modify_text (GtkWidget *w, GtkStateType state, const GdkColor *c) { modify_color (w, 2, state, c); }
+void gtk_widget_modify_base (GtkWidget *w, GtkStateType state, const GdkColor *c) { modify_color (w, 3, state, c); }
 
 GtkStateType gtk_widget_get_state (GtkWidget *widget)
 {
@@ -1181,9 +1234,6 @@ void gtk_settings_set_long_property (GtkSettings *s, const gchar *name, glong v,
 {
   if (g_object_class_find_property (G_OBJECT_GET_CLASS (s), name)) g_object_set (s, name, (gint) v, nullptr);
 }
-void gtk_rc_parse_string (const gchar *) {}
-void gtk_rc_parse (const gchar *) {}
-void gtk_rc_add_default_file (const gchar *) {}
 
 GOptionGroup *gtk_get_option_group (gboolean)
 {
@@ -2881,15 +2931,20 @@ void gtk_widget_override_background_color (GtkWidget *widget, GtkStateFlags stat
  * Key bindings: GtkBindingSet
  * ====================================================================== */
 namespace {
+struct BindingSignal {
+  QByteArray signal;
+  QList<QPair<GType, QVariant>> args;   /* G_TYPE_LONG, G_TYPE_DOUBLE or G_TYPE_STRING (also identifiers) */
+};
 struct BindingEntry {
   guint keyval;
   guint mods;
-  QByteArray signal;
-  QList<QPair<GType, QVariant>> args;   /* G_TYPE_LONG, G_TYPE_DOUBLE or G_TYPE_STRING */
-  bool skip = false;
+  QList<BindingSignal> signals;         /* emitted in order; none: the key is bound to nothing */
+  bool skip = false;                    /* "unbind": stops the search */
 };
-struct BindingSetData { QList<BindingEntry> entries; };
+struct BindingPath { GtkPathType type; QByteArray pattern; int priority; };
+struct BindingSetData { QList<BindingEntry> entries; QList<BindingPath> paths; };
 QHash<QByteArray, GtkBindingSet *> &binding_sets () { static QHash<QByteArray, GtkBindingSet *> h; return h; }
+QList<GtkBindingSet *> &path_binding_sets () { static QList<GtkBindingSet *> l; return l; }
 QHash<GType, GtkBindingSet *> &class_binding_sets () { static QHash<GType, GtkBindingSet *> h; return h; }
 BindingSetData *bsd (GtkBindingSet *s) { return static_cast<BindingSetData *> (s->gtkqt_priv); }
 const guint binding_mods = GDK_SHIFT_MASK | GDK_CONTROL_MASK | GDK_MOD1_MASK | GDK_SUPER_MASK | GDK_HYPER_MASK | GDK_META_MASK;
@@ -2903,8 +2958,22 @@ void binding_remove (GtkBindingSet *s, guint keyval, guint mods)
     if (l[i].keyval == keyval && l[i].mods == mods) l.removeAt (i);
 }
 
-/* emit an entry's signal, converting its arguments to the signal's types */
-bool binding_emit (GObject *o, const BindingEntry &e)
+/* the entry for a key, created when missing (GTK appends further signals to it) */
+BindingEntry &binding_entry (GtkBindingSet *s, guint keyval, guint mods)
+{
+  keyval = gdk_keyval_to_lower (keyval);
+  mods &= binding_mods;
+  QList<BindingEntry> &l = bsd (s)->entries;
+  for (BindingEntry &e : l)
+    if (e.keyval == keyval && e.mods == mods && !e.skip) return e;
+  binding_remove (s, keyval, mods);
+  l << BindingEntry { keyval, mods, {}, false };
+  return l.last ();
+}
+
+/* emit one signal, converting its arguments to the signal's types; an
+ * identifier (or string) argument names a value of an enum or flags type */
+bool binding_emit_signal (GObject *o, const BindingSignal &e)
 {
   guint id = g_signal_lookup (e.signal.constData (), G_OBJECT_TYPE (o));
   if (!id) return false;
@@ -2917,17 +2986,42 @@ bool binding_emit (GObject *o, const BindingEntry &e)
   g_value_set_object (&params[0], o);
   bool ok = true;
   for (guint i = 0; i < q.n_params && ok; i++) {
-    GValue src = G_VALUE_INIT;
     const auto &a = e.args[i];
+    GType want = q.param_types[i] & ~G_SIGNAL_TYPE_STATIC_SCOPE;
+    g_value_init (&params[i + 1], want);
+    if (a.first == G_TYPE_STRING && G_TYPE_IS_ENUM (want)) {
+      auto *ec = (GEnumClass *) g_type_class_ref (want);
+      QByteArray n = a.second.toByteArray ();
+      GEnumValue *ev = g_enum_get_value_by_nick (ec, n.constData ());
+      if (!ev) ev = g_enum_get_value_by_name (ec, n.constData ());
+      if (ev) g_value_set_enum (&params[i + 1], ev->value); else ok = false;
+      g_type_class_unref (ec);
+      continue;
+    }
+    if (a.first == G_TYPE_STRING && G_TYPE_IS_FLAGS (want)) {
+      auto *fc = (GFlagsClass *) g_type_class_ref (want);
+      guint flags = 0;
+      for (const QByteArray &n : a.second.toByteArray ().split ('|')) {
+        QByteArray t = n.trimmed ();
+        GFlagsValue *fv = g_flags_get_value_by_nick (fc, t.constData ());
+        if (!fv) fv = g_flags_get_value_by_name (fc, t.constData ());
+        if (fv) flags |= fv->value; else ok = false;
+      }
+      g_value_set_flags (&params[i + 1], flags);
+      g_type_class_unref (fc);
+      continue;
+    }
+    GValue src = G_VALUE_INIT;
     g_value_init (&src, a.first);
     if (a.first == G_TYPE_LONG) g_value_set_long (&src, a.second.toLongLong ());
     else if (a.first == G_TYPE_DOUBLE) g_value_set_double (&src, a.second.toDouble ());
     else g_value_set_string (&src, a.second.toByteArray ().constData ());
-    GType want = q.param_types[i] & ~G_SIGNAL_TYPE_STATIC_SCOPE;
-    g_value_init (&params[i + 1], want);
     if (G_TYPE_IS_ENUM (want) && a.first == G_TYPE_LONG) g_value_set_enum (&params[i + 1], (gint) a.second.toLongLong ());
     else if (G_TYPE_IS_FLAGS (want) && a.first == G_TYPE_LONG) g_value_set_flags (&params[i + 1], (guint) a.second.toLongLong ());
-    else ok = g_value_transform (&src, &params[i + 1]);
+    else if (want == G_TYPE_BOOLEAN && a.first == G_TYPE_STRING) {
+      QByteArray n = a.second.toByteArray ().toLower ();
+      g_value_set_boolean (&params[i + 1], n == "true" || n == "1");
+    } else ok = g_value_transform (&src, &params[i + 1]);
     g_value_unset (&src);
   }
   if (ok) {
@@ -2935,13 +3029,59 @@ bool binding_emit (GObject *o, const BindingEntry &e)
     if (q.return_type != G_TYPE_NONE) g_value_init (&ret, q.return_type & ~G_SIGNAL_TYPE_STATIC_SCOPE);
     g_signal_emitv (params.data (), id, 0, q.return_type != G_TYPE_NONE ? &ret : nullptr);
     if (G_IS_VALUE (&ret)) g_value_unset (&ret);
+  } else {
+    g_warning ("gtk-made-qt: binding signal \"%s\" on %s: arguments do not fit", e.signal.constData (), G_OBJECT_TYPE_NAME (o));
   }
   for (GValue &v : params) if (G_IS_VALUE (&v)) g_value_unset (&v);
   return ok;
 }
+
+/* GTK: the entry handles the key when its signals were all emitted */
+bool binding_emit (GObject *o, const BindingEntry &e)
+{
+  bool ok = true;
+  for (const BindingSignal &s : e.signals) ok = binding_emit_signal (o, s) && ok;
+  return ok;
+}
+
+/* -1: no entry for the key; 0: unbound; 1: handled */
+int binding_set_activate (GtkBindingSet *s, GObject *object, guint keyval, guint mods)
+{
+  for (const BindingEntry &e : bsd (s)->entries)
+    if (e.keyval == keyval && e.mods == mods) return e.skip ? 0 : (binding_emit (object, e) ? 1 : -1);
+  return -1;
+}
+
+BindingSignal binding_signal_from_args (const gchar *signal_name, GSList *args)
+{
+  /* GtkBindingArg: { GType arg_type; union { glong long_data; gdouble double_data; gchar *string_data; } d; } */
+  struct Arg { GType arg_type; union { glong long_data; gdouble double_data; gchar *string_data; } d; };
+  BindingSignal sig { QByteArray (signal_name), {} };
+  for (GSList *l = args; l; l = l->next) {
+    auto *a = static_cast<Arg *> (l->data);
+    GType f = G_TYPE_FUNDAMENTAL (a->arg_type);
+    if (f == G_TYPE_DOUBLE || f == G_TYPE_FLOAT)
+      sig.args << qMakePair (G_TYPE_DOUBLE, QVariant (a->d.double_data));
+    else if (f == G_TYPE_STRING || a->arg_type == gtk_identifier_get_type ())
+      sig.args << qMakePair (G_TYPE_STRING, QVariant (QByteArray (a->d.string_data)));
+    else
+      sig.args << qMakePair (G_TYPE_LONG, QVariant ((qlonglong) a->d.long_data));
+  }
+  return sig;
+}
 }
 
 extern "C" {
+
+GType gtk_identifier_get_type (void)
+{
+  static GType t = 0;
+  if (!t) {
+    GTypeInfo info = {};
+    t = g_type_register_static (G_TYPE_STRING, "GtkIdentifier", &info, (GTypeFlags) 0);
+  }
+  return t;
+}
 
 GtkBindingSet *gtk_binding_set_new (const gchar *set_name)
 {
@@ -2963,27 +3103,43 @@ GtkBindingSet *gtk_binding_set_by_class (gpointer object_class)
   return s;
 }
 
+/* rc files attach named sets to widgets: class "GtkEntry" binding "emacs" */
+void gtk_binding_set_add_path (GtkBindingSet *s, GtkPathType path_type, const gchar *path_pattern, GtkPathPriorityType priority)
+{
+  g_return_if_fail (s && path_pattern);
+  QByteArray pat (path_pattern);
+  for (const BindingPath &p : bsd (s)->paths)
+    if (p.type == path_type && p.pattern == pat) return;
+  bsd (s)->paths << BindingPath { path_type, pat, (int) priority };
+  path_binding_sets ().removeAll (s);
+  path_binding_sets () << s;
+}
+
 void gtk_binding_entry_add_signal (GtkBindingSet *s, guint keyval, GdkModifierType mods, const gchar *signal_name, guint n_args, ...)
 {
   g_return_if_fail (s && signal_name);
-  BindingEntry e { gdk_keyval_to_lower (keyval), (guint) mods & binding_mods, QByteArray (signal_name), {} };
+  BindingSignal sig { QByteArray (signal_name), {} };
   va_list ap;
   va_start (ap, n_args);
   for (guint i = 0; i < n_args; i++) {
     GType t = va_arg (ap, GType);
+    if (t == gtk_identifier_get_type ()) {
+      sig.args << qMakePair (G_TYPE_STRING, QVariant (QByteArray (va_arg (ap, const gchar *))));
+      continue;
+    }
     switch (G_TYPE_FUNDAMENTAL (t)) {
     case G_TYPE_CHAR: case G_TYPE_UCHAR: case G_TYPE_INT: case G_TYPE_UINT: case G_TYPE_BOOLEAN:
     case G_TYPE_ENUM: case G_TYPE_FLAGS:
-      e.args << qMakePair (G_TYPE_LONG, QVariant ((qlonglong) va_arg (ap, gint)));
+      sig.args << qMakePair (G_TYPE_LONG, QVariant ((qlonglong) va_arg (ap, gint)));
       break;
     case G_TYPE_LONG: case G_TYPE_ULONG:
-      e.args << qMakePair (G_TYPE_LONG, QVariant ((qlonglong) va_arg (ap, glong)));
+      sig.args << qMakePair (G_TYPE_LONG, QVariant ((qlonglong) va_arg (ap, glong)));
       break;
     case G_TYPE_FLOAT: case G_TYPE_DOUBLE:
-      e.args << qMakePair (G_TYPE_DOUBLE, QVariant (va_arg (ap, gdouble)));
+      sig.args << qMakePair (G_TYPE_DOUBLE, QVariant (va_arg (ap, gdouble)));
       break;
     case G_TYPE_STRING:
-      e.args << qMakePair (G_TYPE_STRING, QVariant (QByteArray (va_arg (ap, const gchar *))));
+      sig.args << qMakePair (G_TYPE_STRING, QVariant (QByteArray (va_arg (ap, const gchar *))));
       break;
     default:
       g_warning ("gtk_binding_entry_add_signal: unsupported argument type %s", g_type_name (t));
@@ -2992,50 +3148,66 @@ void gtk_binding_entry_add_signal (GtkBindingSet *s, guint keyval, GdkModifierTy
     }
   }
   va_end (ap);
-  binding_remove (s, keyval, mods);
-  bsd (s)->entries << e;
+  binding_entry (s, keyval, mods).signals << sig;
 }
 
 void gtk_binding_entry_add_signall (GtkBindingSet *s, guint keyval, GdkModifierType mods, const gchar *signal_name, GSList *args)
 {
-  /* GtkBindingArg: { GType arg_type; union { glong long_data; gdouble double_data; gchar *string_data; } d; } */
-  struct Arg { GType arg_type; union { glong long_data; gdouble double_data; gchar *string_data; } d; };
-  BindingEntry e { gdk_keyval_to_lower (keyval), (guint) mods & binding_mods, QByteArray (signal_name), {} };
-  for (GSList *l = args; l; l = l->next) {
-    auto *a = static_cast<Arg *> (l->data);
-    if (G_TYPE_FUNDAMENTAL (a->arg_type) == G_TYPE_DOUBLE || G_TYPE_FUNDAMENTAL (a->arg_type) == G_TYPE_FLOAT)
-      e.args << qMakePair (G_TYPE_DOUBLE, QVariant (a->d.double_data));
-    else if (G_TYPE_FUNDAMENTAL (a->arg_type) == G_TYPE_STRING)
-      e.args << qMakePair (G_TYPE_STRING, QVariant (QByteArray (a->d.string_data)));
-    else
-      e.args << qMakePair (G_TYPE_LONG, QVariant ((qlonglong) a->d.long_data));
-  }
-  binding_remove (s, keyval, mods);
-  bsd (s)->entries << e;
+  g_return_if_fail (s && signal_name);
+  binding_entry (s, keyval, mods).signals << binding_signal_from_args (signal_name, args);
 }
 
 void gtk_binding_entry_remove (GtkBindingSet *s, guint keyval, GdkModifierType mods) { if (s) binding_remove (s, keyval, mods); }
-void gtk_binding_entry_clear (GtkBindingSet *s, guint keyval, GdkModifierType mods) { gtk_binding_entry_remove (s, keyval, mods); }
+
+/* an entry bound to nothing: the key is consumed */
+void gtk_binding_entry_clear (GtkBindingSet *s, guint keyval, GdkModifierType mods)
+{
+  if (!s) return;
+  binding_remove (s, keyval, mods);
+  binding_entry (s, keyval, mods);
+}
 
 /* a skip entry stops the search in parent classes' sets */
 void gtk_binding_entry_skip (GtkBindingSet *s, guint keyval, GdkModifierType mods)
 {
   if (!s) return;
   binding_remove (s, keyval, mods);
-  BindingEntry e { gdk_keyval_to_lower (keyval), (guint) mods & binding_mods, QByteArray (), {} };
-  e.skip = true;
+  BindingEntry e { gdk_keyval_to_lower (keyval), (guint) mods & binding_mods, {}, true };
   bsd (s)->entries << e;
 }
 
+/* GTK's order: sets from CSS (-gtk-key-bindings), then sets attached by
+ * path (rc: widget, widget_class, class) by priority, then the class sets
+ * of the widget's type and its parents */
 gboolean gtk_bindings_activate (GObject *object, guint keyval, GdkModifierType modifiers)
 {
   keyval = gdk_keyval_to_lower (keyval);
   guint mods = (guint) modifiers & binding_mods;
+  if (GTK_IS_WIDGET (object)) {
+    auto *w = GTK_WIDGET (object);
+    for (GtkBindingSet *s : gtkqt_css_binding_sets (w)) {
+      int r = binding_set_activate (s, object, keyval, mods);
+      if (r >= 0) return r;
+    }
+    QList<QPair<int, GtkBindingSet *>> matched;
+    const QList<GtkBindingSet *> &all = path_binding_sets ();
+    for (int i = all.size () - 1; i >= 0; i--) {   /* later sets win at equal priority */
+      int best = -1;
+      for (const BindingPath &p : bsd (all[i])->paths)
+        if (p.priority > best && gtkqt_widget_path_match (w, p.type, p.pattern.constData ())) best = p.priority;
+      if (best >= 0) matched << qMakePair (best, all[i]);
+    }
+    std::stable_sort (matched.begin (), matched.end (), [] (const auto &a, const auto &b) { return a.first > b.first; });
+    for (const auto &m : matched) {
+      int r = binding_set_activate (m.second, object, keyval, mods);
+      if (r >= 0) return r;
+    }
+  }
   for (GType t = G_OBJECT_TYPE (object); t; t = g_type_parent (t)) {
     GtkBindingSet *s = class_binding_sets ().value (t);
     if (!s) continue;
-    for (const BindingEntry &e : bsd (s)->entries)
-      if (e.keyval == keyval && e.mods == mods) return e.skip ? FALSE : binding_emit (object, e);
+    int r = binding_set_activate (s, object, keyval, mods);
+    if (r >= 0) return r;
   }
   return FALSE;
 }
@@ -3049,7 +3221,7 @@ gboolean gtk_bindings_activate_event (GObject *object, GdkEventKey *event)
 
 gboolean gtkqt_bindings_activate (GtkWidget *widget, guint keyval, guint state)
 {
-  if (class_binding_sets ().isEmpty ()) return FALSE;
+  if (class_binding_sets ().isEmpty () && path_binding_sets ().isEmpty () && gtkqt_css_binding_sets (widget).isEmpty ()) return FALSE;
   return gtk_bindings_activate (G_OBJECT (widget), keyval, (GdkModifierType) state);
 }
 

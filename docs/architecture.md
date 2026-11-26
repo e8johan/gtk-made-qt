@@ -57,6 +57,21 @@ QFontDialog. GtkPrintOperation draws each page with cairo in points onto an
 image at the printer's resolution and gives it to QPrinter (print dialog,
 preview, or PDF).
 
+## gtkrc and CSS (rcstyle.cpp)
+
+The look is Qt's; gtkrc and CSS are read for what belongs to the program.
+At startup the library reads `~/.gtkrc-2.0` (GTK 1/2) or `settings.ini`
+and the user's `gtk.css` (GTK 3/4), and loads the key theme the
+`gtk-key-theme-name` setting names. rc `binding` blocks and CSS
+`@binding-set`s become GtkBindingSets; rc `class`/`widget`/`widget_class`
+lines attach them by path (`gtk_binding_set_add_path`), CSS rules by
+`-gtk-key-bindings`. `gtk_bindings_activate` tries those before the class
+sets. Styles are matched when a widget is shown (and again when its name,
+classes or the providers change): the cascade gives colours per GtkStyle
+slot and a font, which go through the same code as `gtk_widget_modify_*`
+(GtkStyle fields and the Qt palette and font), except for slots the program
+set itself.
+
 ## Threads (the GDK lock)
 
 GTK 2 programs call GTK from worker threads between `gdk_threads_enter()`

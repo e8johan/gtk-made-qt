@@ -302,9 +302,11 @@ gboolean   gtk_widget_activate_action_variant (GtkWidget *widget, const char *na
 void       gtk_widget_add_controller (GtkWidget *widget, GtkEventController *controller);
 void       gtk_widget_remove_controller (GtkWidget *widget, GtkEventController *controller);
 
-/* Styling. CSS is not interpreted; style classes are recorded and a few
- * common ones ("suggested-action", "destructive-action", "title",
- * "dim-label", "monospace") get a rough Qt equivalent. */
+/* Styling. Style classes are recorded and a few common ones
+ * ("suggested-action", "destructive-action", "title", "dim-label",
+ * "monospace") get a rough Qt equivalent. CSS providers give widgets the
+ * program's colours (color, background-color), fonts and key bindings
+ * (@binding-set, -gtk-key-bindings); the rest of the look stays Qt's. */
 void       gtk_widget_add_css_class (GtkWidget *widget, const char *css_class);
 void       gtk_widget_remove_css_class (GtkWidget *widget, const char *css_class);
 gboolean   gtk_widget_has_css_class (GtkWidget *widget, const char *css_class);
@@ -321,7 +323,17 @@ GType      gtk_css_provider_get_type (void) G_GNUC_CONST;
 GtkCssProvider *gtk_css_provider_new (void);
 gboolean   gtk_css_provider_load_from_data (GtkCssProvider *provider, const gchar *data, gssize length, GError **error);
 void       gtk_css_provider_load_from_string (GtkCssProvider *provider, const char *string);
-void       gtk_css_provider_load_from_path (GtkCssProvider *provider, const char *path);
+gboolean   gtk_css_provider_load_from_path (GtkCssProvider *provider, const char *path, GError **error);
+gboolean   gtk_css_provider_load_from_file (GtkCssProvider *provider, GFile *file, GError **error);
+void       gtk_css_provider_load_from_bytes (GtkCssProvider *provider, GBytes *data);
+GtkCssProvider *gtk_css_provider_get_default (void);
+GtkCssProvider *gtk_css_provider_get_named (const gchar *name, const gchar *variant);
+char      *gtk_css_provider_to_string (GtkCssProvider *provider);
+void       gtk_style_context_remove_provider (GtkStyleContext *context, gpointer provider);
+void       gtk_style_context_remove_provider_for_screen (GdkScreen *screen, gpointer provider);
+void       gtk_style_context_remove_provider_for_display (GdkDisplay *display, gpointer provider);
+void       gtk_style_context_reset_widgets (GdkScreen *screen);
+gboolean   gtk_style_context_lookup_color (GtkStyleContext *context, const gchar *color_name, GdkRGBA *color);
 void       gtk_css_provider_load_from_resource (GtkCssProvider *provider, const char *resource_path);
 #define GTK_STYLE_PROVIDER(o) ((gpointer) (o))
 #define GTK_STYLE_PROVIDER_PRIORITY_FALLBACK     1
