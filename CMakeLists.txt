@@ -36,6 +36,7 @@ set(GTKQT_SOURCES
     src/builder.cpp
     src/uimanager.cpp
     src/gtk2.cpp
+    src/rcstyle.cpp
     src/print.cpp
     src/script.cpp
     src/gtk1.cpp

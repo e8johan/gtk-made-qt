@@ -1422,6 +1422,159 @@ static void view_paste (GtkTextView *v)
   if (auto *e = text_edit (v)) e->ensureCursorVisible ();
 }
 
+/* "move-cursor": the keyboard's motions, which key bindings emit */
+static void view_move_cursor (GtkTextView *v, gint step, gint count, gboolean extend)
+{
+  auto *e = text_edit (v);
+  if (!e || !count) return;
+  QTextCursor c = e->textCursor ();
+  QTextCursor::MoveMode mode = extend ? QTextCursor::KeepAnchor : QTextCursor::MoveAnchor;
+  int n = qAbs (count);
+  bool fwd = count > 0;
+  auto move = [&] (QTextCursor::MoveOperation op, int times = 1) { c.movePosition (op, mode, times); };
+  switch (step) {
+  case GTK_MOVEMENT_LOGICAL_POSITIONS:
+  case GTK_MOVEMENT_VISUAL_POSITIONS:
+    if (!extend && c.hasSelection ()) {          /* collapse to the edge in that direction */
+      c.setPosition (fwd ? c.selectionEnd () : c.selectionStart ());
+      n--;
+    }
+    if (n > 0) {
+      if (step == GTK_MOVEMENT_VISUAL_POSITIONS) move (fwd ? QTextCursor::Right : QTextCursor::Left, n);
+      else move (fwd ? QTextCursor::NextCharacter : QTextCursor::PreviousCharacter, n);
+    }
+    break;
+  case GTK_MOVEMENT_WORDS:
+    for (int i = 0; i < n; i++) {
+      int p = c.position ();
+      if (fwd) {                                  /* to the end of this or the next word */
+        move (QTextCursor::EndOfWord);
+        if (c.position () == p) { move (QTextCursor::NextWord); move (QTextCursor::EndOfWord); }
+      } else {
+        move (QTextCursor::StartOfWord);
+        if (c.position () == p) move (QTextCursor::PreviousWord);
+      }
+    }
+    break;
+  case GTK_MOVEMENT_DISPLAY_LINES:
+    move (fwd ? QTextCursor::Down : QTextCursor::Up, n);
+    break;
+  case GTK_MOVEMENT_DISPLAY_LINE_ENDS:
+    move (fwd ? QTextCursor::EndOfLine : QTextCursor::StartOfLine);
+    break;
+  case GTK_MOVEMENT_PARAGRAPHS:
+    for (int i = 0; i < n; i++) {
+      int p = c.position ();
+      move (fwd ? QTextCursor::EndOfBlock : QTextCursor::StartOfBlock);
+      if (c.position () == p) {
+        move (fwd ? QTextCursor::NextBlock : QTextCursor::PreviousBlock);
+        move (fwd ? QTextCursor::EndOfBlock : QTextCursor::StartOfBlock);
+      }
+    }
+    break;
+  case GTK_MOVEMENT_PARAGRAPH_ENDS:
+    move (fwd ? QTextCursor::EndOfBlock : QTextCursor::StartOfBlock);
+    break;
+  case GTK_MOVEMENT_PAGES: {
+    int lines = qMax (1, e->viewport ()->height () / qMax (1, e->fontMetrics ().lineSpacing ()) - 1);
+    move (fwd ? QTextCursor::Down : QTextCursor::Up, lines * n);
+    break;
+  }
+  case GTK_MOVEMENT_BUFFER_ENDS:
+    move (fwd ? QTextCursor::End : QTextCursor::Start);
+    break;
+  default:
+    return;
+  }
+  e->setTextCursor (c);
+  e->ensureCursorVisible ();
+}
+
+/* "delete-from-cursor", as GTK's text view does it */
+static void view_delete_from_cursor (GtkTextView *v, gint type, gint count)
+{
+  auto *e = text_edit (v);
+  if (!e || !count || !gtk_text_view_get_editable (v)) return;
+  GtkTextBuffer *b = view_buffer (v);
+  if (type == GTK_DELETE_CHARS && gtk_text_buffer_get_selection_bounds (b, nullptr, nullptr)) {
+    gtk_text_buffer_delete_selection (b, TRUE, TRUE);
+    e->ensureCursorVisible ();
+    return;
+  }
+  QTextCursor c = e->textCursor ();
+  c.clearSelection ();
+  int pos = c.position (), start = pos, end = pos;
+  QTextCursor m = c;
+  auto at = [&] (QTextCursor::MoveOperation op, int times = 1) { m.movePosition (op, QTextCursor::MoveAnchor, times); return m.position (); };
+  int n = qAbs (count);
+  switch (type) {
+  case GTK_DELETE_CHARS:
+    if (count > 0) end = at (QTextCursor::NextCharacter, n); else start = at (QTextCursor::PreviousCharacter, n);
+    break;
+  case GTK_DELETE_WORD_ENDS:
+  case GTK_DELETE_WORDS:
+    if (type == GTK_DELETE_WORDS) { start = end = at (QTextCursor::StartOfWord); }
+    for (int i = 0; i < n; i++) {
+      if (count > 0) {
+        int p = m.position ();
+        at (QTextCursor::EndOfWord);
+        if (m.position () == p) { at (QTextCursor::NextWord); at (QTextCursor::EndOfWord); }
+        end = m.position ();
+      } else {
+        int p = m.position ();
+        at (QTextCursor::StartOfWord);
+        if (m.position () == p) at (QTextCursor::PreviousWord);
+        start = m.position ();
+      }
+    }
+    break;
+  case GTK_DELETE_DISPLAY_LINE_ENDS:
+    if (count > 0) end = at (QTextCursor::EndOfLine); else start = at (QTextCursor::StartOfLine);
+    break;
+  case GTK_DELETE_PARAGRAPH_ENDS:
+    if (count > 0) {                              /* at the end of a line: the line break (Emacs C-k) */
+      for (int i = 0; i < n; i++) {
+        if (m.atBlockEnd ()) at (QTextCursor::NextCharacter); else at (QTextCursor::EndOfBlock);
+      }
+      end = m.position ();
+    } else {
+      for (int i = 0; i < n; i++) {
+        if (m.atBlockStart ()) at (QTextCursor::PreviousCharacter); else at (QTextCursor::StartOfBlock);
+      }
+      start = m.position ();
+    }
+    break;
+  case GTK_DELETE_DISPLAY_LINES:
+    start = at (QTextCursor::StartOfLine);
+    at (QTextCursor::Down, n - 1);
+    end = at (QTextCursor::EndOfLine);
+    if (!m.atEnd ()) end = at (QTextCursor::NextCharacter);
+    break;
+  case GTK_DELETE_PARAGRAPHS:
+    start = at (QTextCursor::StartOfBlock);
+    at (QTextCursor::NextBlock, n - 1);
+    end = at (QTextCursor::EndOfBlock);
+    if (!m.atEnd ()) end = at (QTextCursor::NextCharacter);
+    break;
+  case GTK_DELETE_WHITESPACE: {
+    QTextDocument *doc = e->document ();
+    while (start > 0 && doc->characterAt (start - 1).isSpace () && doc->characterAt (start - 1) != QChar::ParagraphSeparator) start--;
+    while (doc->characterAt (end).isSpace () && doc->characterAt (end) != QChar::ParagraphSeparator) end++;
+    break;
+  }
+  default:
+    return;
+  }
+  if (start == end) return;
+  GtkTextIter s, t;
+  gtk_text_buffer_get_iter_at_offset (b, &s, qMin (start, end));
+  gtk_text_buffer_get_iter_at_offset (b, &t, qMax (start, end));
+  gtk_text_buffer_begin_user_action (b);
+  gtk_text_buffer_delete_interactive (b, &s, &t, TRUE);
+  gtk_text_buffer_end_user_action (b);
+  e->ensureCursorVisible ();
+}
+
 static void text_view_place (GtkContainer *c, GtkWidget *child);
 static void text_view_unplace (GtkContainer *c, GtkWidget *child);
 
@@ -1442,8 +1595,17 @@ static void gtk_text_view_class_init (GtkTextViewClass *klass)
                 G_TYPE_NONE, 1, G_TYPE_STRING);
   g_signal_new ("select-all", t, action, 0, nullptr, nullptr, nullptr, G_TYPE_NONE, 1, G_TYPE_BOOLEAN);
   g_signal_new ("set-anchor", t, action, G_STRUCT_OFFSET (GtkTextViewClass, set_anchor), nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
+  g_signal_new ("move-cursor", t, action, G_STRUCT_OFFSET (GtkTextViewClass, move_cursor), nullptr, nullptr, nullptr,
+                G_TYPE_NONE, 3, GTK_TYPE_MOVEMENT_STEP, G_TYPE_INT, G_TYPE_BOOLEAN);
+  g_signal_new ("delete-from-cursor", t, action, G_STRUCT_OFFSET (GtkTextViewClass, delete_from_cursor), nullptr, nullptr, nullptr,
+                G_TYPE_NONE, 2, GTK_TYPE_DELETE_TYPE, G_TYPE_INT);
   g_signal_new ("populate-popup", t, G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET (GtkTextViewClass, populate_popup), nullptr, nullptr, nullptr,
                 G_TYPE_NONE, 1, GTK_TYPE_WIDGET);
+  klass->move_cursor = view_move_cursor;
+  klass->set_anchor = [] (GtkTextView *v) {
+    if (auto *e = text_edit (v)) { QTextCursor c = e->textCursor (); c.clearSelection (); e->setTextCursor (c); }
+  };
+  klass->delete_from_cursor = view_delete_from_cursor;
   klass->cut_clipboard = view_cut;
   klass->copy_clipboard = view_copy;
   klass->paste_clipboard = view_paste;

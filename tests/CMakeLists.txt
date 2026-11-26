@@ -71,3 +71,15 @@ set_tests_properties(pixbuf PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" T
 gtkqt_add_program(test-xournal ${CMAKE_CURRENT_SOURCE_DIR}/test-xournal.c 2)
 add_test(NAME xournal COMMAND test-xournal)
 set_tests_properties(xournal PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
+
+# gtkrc: user rc file, styles by class / widget / widget_class, the key
+# theme, the program's own rc bindings, program colours over rc colours
+gtkqt_add_program(test-rc ${CMAKE_CURRENT_SOURCE_DIR}/test-rc.c 2)
+add_test(NAME rc COMMAND test-rc)
+set_tests_properties(rc PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
+
+# CSS: colours and fonts by node / type / #name / .class, states,
+# priorities, per-widget providers, @binding-set, the key theme
+gtkqt_add_program(test-css ${CMAKE_CURRENT_SOURCE_DIR}/test-css.c 3)
+add_test(NAME css COMMAND test-css)
+set_tests_properties(css PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)

@@ -84,8 +84,16 @@ the real GTK or GTK made Qt, so both can be installed side by side.
 - Platform: `QT_QPA_PLATFORM=wayland`, `xcb`, `offscreen` ...
 - File, font and print dialogs are Qt's; printing goes through Qt
   (printers, PDF).
-- GTK resource files (`gtkrc`) and CSS are not interpreted: the program
-  takes the desktop's Qt look.
+- The look is the desktop's Qt look: GTK themes are not loaded. What
+  programs and users put in gtkrc files and CSS about the program itself is
+  used: colours, fonts and key bindings.
+- Key themes: `gtk-key-theme-name = "Emacs"` in `~/.gtkrc-2.0` (GTK 2
+  programs) or `gtk-key-theme-name = Emacs` under `[Settings]` in
+  `~/.config/gtk-3.0/settings.ini` (GTK 3) gives text fields Emacs keys,
+  read from `/usr/share/themes/Emacs/`. GTK 4 has no key themes. As in
+  GTK 2, menu mnemonics (Alt+F) and the window's accelerators come first.
+- `GTK2_RC_FILES` replaces the default rc files, as in GTK; settings that
+  are about the look (theme, font and icon theme names) stay Qt's.
 
 ## What works
 

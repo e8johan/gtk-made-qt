@@ -17,7 +17,11 @@
  * ====================================================================== */
 struct _GtkAccelGroup { GObject parent_instance; gpointer priv; };
 typedef struct { GObjectClass parent_class; } GtkAccelGroupClass;
-struct AccelData { QList<QPointer<QAction>> actions; QList<QPointer<QWidget>> windows; };
+struct AccelData {
+  QList<QPointer<QAction>> actions;
+  QList<QPointer<QWidget>> windows;
+  QList<QPair<QPointer<QAction>, QList<QKeySequence>>> detached;   /* shortcuts taken away while no window has the group */
+};
 static AccelData *accel (GtkAccelGroup *g) { return static_cast<AccelData *> (g->priv); }
 
 G_DEFINE_TYPE (GtkAccelGroup, gtk_accel_group, G_TYPE_OBJECT)
@@ -32,8 +36,17 @@ static void gtk_accel_group_class_init (GtkAccelGroupClass *klass) { G_OBJECT_CL
 void gtkqt_accel_group_attach (GtkAccelGroup *group, QWidget *window)
 {
   if (!window) return;
-  accel (group)->windows << window;
-  for (const QPointer<QAction> &a : accel (group)->actions) if (a) window->addAction (a);
+  AccelData *d = accel (group);
+  d->windows << window;
+  for (const QPointer<QAction> &a : d->actions) if (a) window->addAction (a);
+  /* the group's accelerators work again */
+  for (const auto &p : d->detached) {
+    if (!p.first) continue;
+    QList<QKeySequence> all = p.first->shortcuts ();
+    for (const QKeySequence &k : p.second) if (!all.contains (k)) all << k;
+    p.first->setShortcuts (all);
+  }
+  d->detached.clear ();
 }
 
 gboolean gtkqt_accel_group_trigger (GtkAccelGroup *group, const QKeySequence &seq)
@@ -46,8 +59,19 @@ gboolean gtkqt_accel_group_trigger (GtkAccelGroup *group, const QKeySequence &se
 void gtkqt_accel_group_detach (GtkAccelGroup *group, QWidget *window)
 {
   if (!window) return;
-  accel (group)->windows.removeAll (window);
-  for (const QPointer<QAction> &a : accel (group)->actions) if (a) window->removeAction (a);
+  AccelData *d = accel (group);
+  d->windows.removeAll (window);
+  for (const QPointer<QAction> &a : d->actions) if (a) window->removeAction (a);
+  /* a menu item's action keeps its shortcut through the menu bar: a group
+   * no window has any more takes its accelerators with it (Leafpad's Emacs
+   * mode swaps the window's group for one with other keys) */
+  d->windows.removeAll (nullptr);
+  if (!d->windows.isEmpty ()) return;
+  for (const QPointer<QAction> &a : d->actions) {
+    if (!a || a->shortcuts ().isEmpty ()) continue;
+    d->detached << qMakePair (a, a->shortcuts ());
+    a->setShortcuts (QList<QKeySequence> ());
+  }
 }
 
 void gtkqt_accel_group_add_action (GtkAccelGroup *group, QAction *action)

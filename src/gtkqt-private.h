@@ -257,6 +257,15 @@ class QTabletEvent;
 bool       gtkqt_tablet_event (GtkWidget *widget, QWidget *qw, QTabletEvent *event, GdkWindow *window);
 void       gtkqt_devices_init (void);
 gboolean   gtkqt_bindings_activate (GtkWidget *widget, guint keyval, guint state);   /* GtkBindingSet */
+/* gtkrc / CSS (rcstyle.cpp) */
+void       gtkqt_rc_init (void);                                   /* default rc files, settings, key theme */
+void       gtkqt_rc_style_widget (GtkWidget *widget, bool recurse); /* apply the matching rc / CSS rules */
+void       gtkqt_rc_restyle_all (void);
+void       gtkqt_rc_program_reset (GtkWidget *widget);              /* after modify_*(NULL) */
+bool       gtkqt_widget_path_match (GtkWidget *widget, int path_type, const char *pattern);   /* GtkPathType */
+QList<GtkBindingSet *> gtkqt_css_binding_sets (GtkWidget *widget);  /* -gtk-key-bindings */
+void       gtkqt_style_rc_color (GtkWidget *w, int kind, GtkStateType state, const GdkColor *c);  /* 0 fg 1 bg 2 text 3 base */
+void       gtkqt_style_rc_font (GtkWidget *w, const PangoFontDescription *font_desc);
 QImage     gtkqt_pixbuf_image (GdkPixbuf *pixbuf);
 GdkPixbuf *gtkqt_pixbuf_from_image (const QImage &image);
 GtkWidget *gtkqt_text_buffer_any_view (GtkTextBuffer *buffer);

@@ -1033,24 +1033,28 @@ public:
     }
     g_object_unref (gw);
   }
+  void paste_text ()
+  {
+    QString t = QGuiApplication::clipboard ()->text ();
+    t.replace ('\n', ' ').remove ('\r');
+    replace_selection (t);
+  }
+  void cut_text ()
+  {
+    if (!hasSelectedText () || echoMode () != QLineEdit::Normal) return;
+    QGuiApplication::clipboard ()->setText (selectedText ());
+    replace_selection (QString ());
+  }
 protected:
   void keyPressEvent (QKeyEvent *e) override
   {
-    if (!alive () || isReadOnly ()) { QLineEdit::keyPressEvent (e); return; }
+    if (!alive ()) { QLineEdit::keyPressEvent (e); return; }
     Qt::KeyboardModifiers m = e->modifiers () & ~Qt::KeypadModifier;
-    if (e->matches (QKeySequence::Paste)) {
-      QString t = QGuiApplication::clipboard ()->text ();
-      t.replace ('\n', ' ').remove ('\r');
-      replace_selection (t);
-      return;
-    }
-    if (e->matches (QKeySequence::Cut)) {
-      if (hasSelectedText ()) {
-        QGuiApplication::clipboard ()->setText (selectedText ());
-        replace_selection (QString ());
-      }
-      return;
-    }
+    /* the clipboard keys emit GtkEntry's action signals, as in GTK */
+    if (e->matches (QKeySequence::Copy)) { g_signal_emit_by_name (gw, "copy-clipboard"); return; }
+    if (isReadOnly ()) { QLineEdit::keyPressEvent (e); return; }
+    if (e->matches (QKeySequence::Paste)) { g_signal_emit_by_name (gw, "paste-clipboard"); return; }
+    if (e->matches (QKeySequence::Cut)) { g_signal_emit_by_name (gw, "cut-clipboard"); return; }
     if ((e->key () == Qt::Key_Backspace || e->key () == Qt::Key_Delete) && !(m & ~Qt::ControlModifier)) {
       if (hasSelectedText ()) { replace_selection (QString ()); return; }
       int pos = cursorPosition (), other = pos;
@@ -1168,6 +1172,101 @@ static void entry_real_delete_text (GtkEditable *editable, gint start_pos, gint 
   l->setCursorPosition (start_pos);
 }
 
+/* GtkEntry's keyboard action signals (key bindings and key themes emit them) */
+static bool word_char (QChar c) { return c.isLetterOrNumber () || c == '_'; }
+
+static void entry_move_cursor (GtkEntry *entry, GtkMovementStep step, gint count, gboolean extend)
+{
+  QLineEdit *l = editable_line (GTK_EDITABLE (entry));
+  if (!l || !count) return;
+  int n = qAbs (count);
+  bool fwd = count > 0;
+  switch (step) {
+  case GTK_MOVEMENT_LOGICAL_POSITIONS:
+  case GTK_MOVEMENT_VISUAL_POSITIONS:
+    if (!extend && l->hasSelectedText ()) {     /* collapse to the edge in that direction */
+      int a = l->selectionStart (), b = a + l->selectedText ().size ();
+      l->setCursorPosition (fwd ? b : a);
+      if (--n == 0) return;
+    }
+    if (step == GTK_MOVEMENT_VISUAL_POSITIONS && l->isRightToLeft ()) fwd = !fwd;
+    if (fwd) l->cursorForward (extend, n); else l->cursorBackward (extend, n);
+    break;
+  case GTK_MOVEMENT_WORDS:
+    for (int i = 0; i < n; i++) {
+      QString t = l->text ();
+      int p = l->cursorPosition ();
+      if (fwd) { while (p < t.size () && !word_char (t[p])) p++; while (p < t.size () && word_char (t[p])) p++; }
+      else { while (p > 0 && !word_char (t[p - 1])) p--; while (p > 0 && word_char (t[p - 1])) p--; }
+      l->cursorForward (extend, p - l->cursorPosition ());
+    }
+    break;
+  case GTK_MOVEMENT_DISPLAY_LINE_ENDS:
+  case GTK_MOVEMENT_PARAGRAPH_ENDS:
+  case GTK_MOVEMENT_BUFFER_ENDS:
+  case GTK_MOVEMENT_PARAGRAPHS:
+  case GTK_MOVEMENT_PAGES:
+    if (fwd) l->end (extend); else l->home (extend);
+    break;
+  default:
+    break;
+  }
+}
+
+static void entry_delete_from_cursor (GtkEntry *entry, GtkDeleteType type, gint count)
+{
+  GtkEditable *ed = GTK_EDITABLE (entry);
+  QLineEdit *l = editable_line (ed);
+  if (!l || l->isReadOnly ()) return;
+  if (type == GTK_DELETE_CHARS && l->hasSelectedText ()) {
+    int a = l->selectionStart ();
+    gtk_editable_delete_text (ed, a, a + l->selectedText ().size ());
+    return;
+  }
+  QString t = l->text ();
+  int pos = l->cursorPosition (), start = pos, end = pos;
+  switch (type) {
+  case GTK_DELETE_CHARS:
+    end = qBound (0, pos + count, (int) t.size ());
+    break;
+  case GTK_DELETE_WORD_ENDS:
+  case GTK_DELETE_WORDS:
+    if (type == GTK_DELETE_WORDS) {               /* from the start of the word under the cursor */
+      while (start > 0 && word_char (t[start - 1])) start--;
+      end = start;
+    }
+    for (int i = 0; i < qAbs (count); i++) {
+      if (count > 0) { while (end < t.size () && !word_char (t[end])) end++; while (end < t.size () && word_char (t[end])) end++; }
+      else { while (start > 0 && !word_char (t[start - 1])) start--; while (start > 0 && word_char (t[start - 1])) start--; }
+    }
+    break;
+  case GTK_DELETE_DISPLAY_LINE_ENDS:
+  case GTK_DELETE_PARAGRAPH_ENDS:
+    if (count < 0) start = 0; else end = t.size ();
+    break;
+  case GTK_DELETE_DISPLAY_LINES:
+  case GTK_DELETE_PARAGRAPHS:
+    start = 0;
+    end = t.size ();
+    break;
+  case GTK_DELETE_WHITESPACE:
+    while (start > 0 && t[start - 1].isSpace ()) start--;
+    while (end < t.size () && t[end].isSpace ()) end++;
+    break;
+  }
+  if (start > end) qSwap (start, end);
+  if (start != end) gtk_editable_delete_text (ed, start, end);
+}
+
+static void entry_insert_at_cursor (GtkEntry *entry, const gchar *str)
+{
+  QLineEdit *l = editable_line (GTK_EDITABLE (entry));
+  if (!l || l->isReadOnly () || !str) return;
+  gint pos = l->cursorPosition ();
+  gtk_editable_insert_text (GTK_EDITABLE (entry), str, -1, &pos);
+  l->setCursorPosition (pos);
+}
+
 static void gtk_entry_class_init (GtkEntryClass *klass)
 {
   G_OBJECT_CLASS (klass)->dispose = entry_dispose;
@@ -1181,6 +1280,23 @@ static void gtk_entry_class_init (GtkEntryClass *klass)
                               G_TYPE_NONE, 3, G_TYPE_STRING, G_TYPE_INT, G_TYPE_POINTER);
   g_signal_new_class_handler ("delete-text", t, G_SIGNAL_RUN_LAST, G_CALLBACK (entry_real_delete_text), nullptr, nullptr, nullptr,
                               G_TYPE_NONE, 2, G_TYPE_INT, G_TYPE_INT);
+  GSignalFlags action = (GSignalFlags) (G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION);
+  g_signal_new_class_handler ("move-cursor", t, action, G_CALLBACK (entry_move_cursor), nullptr, nullptr, nullptr,
+                              G_TYPE_NONE, 3, GTK_TYPE_MOVEMENT_STEP, G_TYPE_INT, G_TYPE_BOOLEAN);
+  g_signal_new_class_handler ("delete-from-cursor", t, action, G_CALLBACK (entry_delete_from_cursor), nullptr, nullptr, nullptr,
+                              G_TYPE_NONE, 2, GTK_TYPE_DELETE_TYPE, G_TYPE_INT);
+  g_signal_new_class_handler ("insert-at-cursor", t, action, G_CALLBACK (entry_insert_at_cursor), nullptr, nullptr, nullptr,
+                              G_TYPE_NONE, 1, G_TYPE_STRING);
+  g_signal_new_class_handler ("backspace", t, action, G_CALLBACK (+[] (GtkEntry *e) {
+    g_signal_emit_by_name (e, "delete-from-cursor", GTK_DELETE_CHARS, -1);
+  }), nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
+  g_signal_new_class_handler ("cut-clipboard", t, action, G_CALLBACK (+[] (GtkEntry *e) { gtk_editable_cut_clipboard (GTK_EDITABLE (e)); }),
+                              nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
+  g_signal_new_class_handler ("copy-clipboard", t, action, G_CALLBACK (+[] (GtkEntry *e) { gtk_editable_copy_clipboard (GTK_EDITABLE (e)); }),
+                              nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
+  g_signal_new_class_handler ("paste-clipboard", t, action, G_CALLBACK (+[] (GtkEntry *e) { gtk_editable_paste_clipboard (GTK_EDITABLE (e)); }),
+                              nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
+  g_signal_new_class_handler ("toggle-overwrite", t, action, G_CALLBACK (+[] (GtkEntry *) {}), nullptr, nullptr, nullptr, G_TYPE_NONE, 0);
   gtkqt_prop (klass, g_param_spec_string ("text", nullptr, nullptr, "", RW),
               [] (GObject *o, const GValue *v) { gtk_entry_set_text (GTK_ENTRY (o), g_value_get_string (v)); },
               [] (GObject *o, GValue *v) { g_value_set_string (v, gtk_entry_get_text (GTK_ENTRY (o))); });
@@ -1397,9 +1513,19 @@ void gtk_editable_set_editable (GtkEditable *editable, gboolean is_editable)
   if (QLineEdit *l = editable_line (editable)) l->setReadOnly (!is_editable);
 }
 gboolean gtk_editable_get_editable (GtkEditable *editable) { QLineEdit *l = editable_line (editable); return l && !l->isReadOnly (); }
-void gtk_editable_cut_clipboard (GtkEditable *editable) { if (QLineEdit *l = editable_line (editable)) l->cut (); }
+void gtk_editable_cut_clipboard (GtkEditable *editable)
+{
+  QLineEdit *l = editable_line (editable);
+  if (auto *g = dynamic_cast<GtkQtLineEdit *> (l)) { if (!g->isReadOnly ()) g->cut_text (); }
+  else if (l) l->cut ();
+}
 void gtk_editable_copy_clipboard (GtkEditable *editable) { if (QLineEdit *l = editable_line (editable)) l->copy (); }
-void gtk_editable_paste_clipboard (GtkEditable *editable) { if (QLineEdit *l = editable_line (editable)) l->paste (); }
+void gtk_editable_paste_clipboard (GtkEditable *editable)
+{
+  QLineEdit *l = editable_line (editable);
+  if (auto *g = dynamic_cast<GtkQtLineEdit *> (l)) { if (!g->isReadOnly ()) g->paste_text (); }
+  else if (l) l->paste ();
+}
 void gtk_editable_delete_selection (GtkEditable *editable) { if (QLineEdit *l = editable_line (editable)) l->del (); }
 
 void gtk_editable_set_width_chars (GtkEditable *editable, gint n_chars)

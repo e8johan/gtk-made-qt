@@ -216,6 +216,7 @@ static void setup_app ()
 {
   gtkqt_script_start ();
   gtkqt_devices_init ();
+  gtkqt_rc_init ();      /* gtkrc / settings.ini, user CSS, the key theme */
   /* GTK always has its stock icons; where Qt's platform has no icon theme
    * (offscreen, bare window managers) use an installed one */
   {
@@ -1241,6 +1242,7 @@ bool GtkQtBridge::eventFilter (QObject *watched, QEvent *e)
     return false;
   }
   case QEvent::Show:
+    gtkqt_rc_style_widget (w, false);   /* gtkrc / CSS colours, fonts, key bindings */
     ensure_realized (w);
     w->flags |= GTK_MAPPED | GTK_REALIZED;
     g_signal_emit (w, widget_signals[SIG_MAP], 0);
@@ -1614,6 +1616,7 @@ void gtk_widget_set_has_tooltip (GtkWidget *, gboolean) {}
 void gtk_widget_set_name (GtkWidget *widget, const gchar *name)
 {
   if (QObject *o = gtkqt_obj (widget)) o->setObjectName (gtkqt_str (name));
+  if (QWidget *qw = gtkqt_qw (widget); qw && qw->isVisible ()) gtkqt_rc_style_widget (widget, true);
 }
 
 const gchar *gtk_widget_get_name (GtkWidget *widget)
@@ -2030,14 +2033,20 @@ void gtk_widget_add_css_class (GtkWidget *widget, const char *css_class)
   QString cls = gtkqt_str (css_class);
   if (widget->priv->css_classes.contains (cls)) return;
   widget->priv->css_classes.append (cls);
-  if (QWidget *qw = qobject_cast<QWidget *> (widget->priv->obj.data ())) apply_css_class (qw, cls, true);
+  if (QWidget *qw = qobject_cast<QWidget *> (widget->priv->obj.data ())) {
+    apply_css_class (qw, cls, true);
+    if (qw->isVisible ()) gtkqt_rc_style_widget (widget, true);
+  }
 }
 
 void gtk_widget_remove_css_class (GtkWidget *widget, const char *css_class)
 {
   QString cls = gtkqt_str (css_class);
   if (!widget->priv->css_classes.removeAll (cls)) return;
-  if (QWidget *qw = gtkqt_qw (widget)) apply_css_class (qw, cls, false);
+  if (QWidget *qw = gtkqt_qw (widget)) {
+    apply_css_class (qw, cls, false);
+    if (qw->isVisible ()) gtkqt_rc_style_widget (widget, true);
+  }
 }
 
 gboolean gtk_widget_has_css_class (GtkWidget *widget, const char *css_class)
@@ -2058,20 +2067,6 @@ GtkStyleContext *gtk_widget_get_style_context (GtkWidget *widget) { return (GtkS
 void gtk_style_context_add_class (GtkStyleContext *c, const gchar *n) { gtk_widget_add_css_class ((GtkWidget *) c, n); }
 void gtk_style_context_remove_class (GtkStyleContext *c, const gchar *n) { gtk_widget_remove_css_class ((GtkWidget *) c, n); }
 gboolean gtk_style_context_has_class (GtkStyleContext *c, const gchar *n) { return gtk_widget_has_css_class ((GtkWidget *) c, n); }
-void gtk_style_context_add_provider (GtkStyleContext *, gpointer, guint) {}
-void gtk_style_context_add_provider_for_screen (GdkScreen *, gpointer, guint) {}
-void gtk_style_context_add_provider_for_display (GdkDisplay *, gpointer, guint) {}
-
-struct _GtkCssProvider { GObject parent_instance; };
-typedef struct { GObjectClass parent_class; } GtkCssProviderClass;
-G_DEFINE_TYPE (GtkCssProvider, gtk_css_provider, G_TYPE_OBJECT)
-static void gtk_css_provider_init (GtkCssProvider *) {}
-static void gtk_css_provider_class_init (GtkCssProviderClass *) {}
-GtkCssProvider *gtk_css_provider_new (void) { return (GtkCssProvider *) g_object_new (gtk_css_provider_get_type (), nullptr); }
-gboolean gtk_css_provider_load_from_data (GtkCssProvider *, const gchar *, gssize, GError **) { return TRUE; }
-void gtk_css_provider_load_from_string (GtkCssProvider *, const char *) {}
-void gtk_css_provider_load_from_path (GtkCssProvider *, const char *) {}
-void gtk_css_provider_load_from_resource (GtkCssProvider *, const char *) {}
 
 } /* extern "C" */
 

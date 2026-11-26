@@ -37,6 +37,8 @@ typedef GtkWidget GtkNative;
 #define gtk_image_set_from_icon_name(img, name)  gtk_image_set_from_icon_name ((img), (name), GTK_ICON_SIZE_BUTTON)
 #define gtk_popover_new()                        gtk_popover_new (NULL)
 #define gtk_css_provider_load_from_data(p, d, l) gtk_css_provider_load_from_data ((p), (d), (l), NULL)
+#define gtk_css_provider_load_from_path(p, f)    gtk_css_provider_load_from_path ((p), (f), NULL)
+#define gtk_css_provider_load_from_file(p, f)    gtk_css_provider_load_from_file ((p), (f), NULL)
 #define gtk_file_chooser_set_current_folder(c, f, e) gtk_file_chooser_set_current_folder_file ((c), (f), (e))
 #endif
 
